@@ -5,6 +5,12 @@ Running notes for Okta APAC SE Summit attendees, captured while working through
 against this repo. The blog assumes context/accounts it never states explicitly — this
 doc calls those out as they're found, plus any other setup friction.
 
+> **2026-08-26 — Repo restructured.** The root FastAPI web app moved into
+> `chatWebApp/`, and `registerAgent/` was renamed to `agentCoreDeployment/`. All path
+> references in the entries below predate this restructure and describe the old
+> layout (root-level `app.py`, `.env`, etc., and `registerAgent/`) — read them with
+> that in mind.
+
 ## Missing environment prerequisites
 
 The blog does not state up front that you need **four separate accounts/environments**

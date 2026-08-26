@@ -35,7 +35,7 @@ access_token=""
 app = BedrockAgentCoreApp()
 
 # Auth0, FGA, and Okta settings — read directly from the environment. Locally these come
-# from registerAgent/.env; when deployed, AgentCore Runtime injects them via its own
+# from agentCoreDeployment/.env; when deployed, AgentCore Runtime injects them via its own
 # environment_variables config (set by agentcore_deployment.py at deploy time).
 # CIBA reuses the same Auth0 application as the main login/JWT-authorizer flow (per the
 # blog: ticking the Token Vault + CIBA grant checkboxes on that one app) — so these read

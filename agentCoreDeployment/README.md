@@ -1,6 +1,6 @@
-# Register Agent
+# AgentCore Deployment
 
-This folder holds the Register Agent assets and deployment helpers. The documentation below only covers files that live directly in `registerAgent/` 
+This folder holds the agent code and deployment helpers. The documentation below only covers files that live directly in `agentCoreDeployment/` 
 
 ## Key Files
 
@@ -34,7 +34,7 @@ This folder holds the Register Agent assets and deployment helpers. The document
 
 Run the deployment helper from this folder once the `.env` file is ready:
 ```bash
-python agentCore_Auth0/agentcore_deployment.py
+python agentcore_deployment.py
 ```
 The script will:
 - Validate AWS credentials.
@@ -45,7 +45,7 @@ The script will:
 
 `agentcore_agent.py` is invoked by the AgentCore runtime, but you can run it locally for debugging:
 ```bash
-python agentCore_Auth0/agentcore_agent.py
+python agentcore_agent.py
 ```
 Ensure that:
 - The `.env` is loaded (handled automatically at import).

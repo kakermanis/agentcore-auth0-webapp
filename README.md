@@ -249,8 +249,8 @@ Auth0 tenant setup steps in Section 5.3 — this is just the "why," so you recog
 symptom if you skip or mis-order either one):
 
 1. The Okta connection's own default scope (set when you create the connection).
-2. `CONNECTED_ACCOUNT_SCOPE` in the root `.env` (already defaults to the right value in
-   `env.template` — see Section 5.3).
+2. `CONNECTED_ACCOUNT_SCOPE` in `chatWebApp/.env` (already defaults to the right value in
+   `chatWebApp/env.template` — see Section 5.3).
 
 **Symptom if only (1) is missing**: the My Account API rejects the Connect Account
 request outright with `Custom scopes are not allowed for this request`. **Symptom if
@@ -266,7 +266,7 @@ token doesn't retroactively pick up a scope change; it only takes effect on re-a
 
 ### Bedrock model availability
 
-Whatever `BEDROCK_MODEL_ID` ships as a default in `registerAgent/env.sample` will not
+Whatever `BEDROCK_MODEL_ID` ships as a default in `agentCoreDeployment/env.sample` will not
 necessarily be available in your own AWS account/region by the time you read this —
 Bedrock model IDs and cross-region inference profiles change over time (new ones added,
 old ones deprecated). Check the Bedrock console's model catalog (or
@@ -283,10 +283,10 @@ value.
 
 Before starting here, ensure you have all the required tools and environments setup as outlined above in Section 3
 
-Throughout this section, **"Web App .env"** means the env file for the root FastAPI web
-app (currently `.env` at the repo root, copied from `env.template`), and **"AgentCore
+Throughout this section, **"Web App .env"** means the env file for the FastAPI web
+app (currently `chatWebApp/.env`, copied from `chatWebApp/env.template`), and **"AgentCore
 Deployment .env"** means the env file for the agent itself (currently
-`registerAgent/.env`, copied from `registerAgent/env.sample`). Whenever a step produces
+`agentCoreDeployment/.env`, copied from `agentCoreDeployment/env.sample`). Whenever a step produces
 a value you need, this doc tells you which of the two files it goes into and under which
 variable name.
 
@@ -297,8 +297,9 @@ git clone <this-repo-url> agentcore-auth0-webapp
 cd agentcore-auth0-webapp
 ```
 
-Two independent apps live here: the root FastAPI web app, and `registerAgent/`, the
-AgentCore agent + its local-only deploy script. Each has its own `.env`.
+Two independent apps live here: `chatWebApp/`, the FastAPI web app, and
+`agentCoreDeployment/`, the AgentCore agent + its local-only deploy script. Each has its
+own `.env`.
 
 ### 5.2 Okta org setup
 
@@ -345,7 +346,7 @@ AgentCore agent + its local-only deploy script. Each has its own `.env`.
      Authentication).
 2. **Custom API for `AUTH0_AUDIENCE`**: Applications → APIs → Create API. Name it
    `SESummitAPI`, identifier (the `aud` claim) exactly `https://agentcore-lab-api` —
-   this matches the default already in `env.template` and `registerAgent/env.sample`,
+   this matches the default already in `chatWebApp/env.template` and `agentCoreDeployment/env.sample`,
    so using it as-is means nothing needs editing later. No scopes required.
 3. **Enterprise connection to Okta**: Authentication → Enterprise → add an OIDC
    connection. Create it as an OIDC-based Enterprise Connection within your Auth0
@@ -442,7 +443,7 @@ via an AWS SSO profile rather than static credentials.
 
 ### 5.6 Populate the AgentCore Deployment .env
 
-Copy `registerAgent/env.sample` → `registerAgent/.env`. Its defaults are already the
+Copy `agentCoreDeployment/env.sample` → `agentCoreDeployment/.env`. Its defaults are already the
 correct values for this lab — only the tenant/account-specific fields below need
 filling in; leave everything else as shipped:
 
@@ -463,7 +464,7 @@ filling in; leave everything else as shipped:
 
 ### 5.7 Populate the Web App .env
 
-Copy `env.template` → `.env`. As with the AgentCore Deployment .env, the defaults are
+Copy `chatWebApp/env.template` → `chatWebApp/.env`. As with the AgentCore Deployment .env, the defaults are
 already correct for this lab:
 
 | Var | Source |
@@ -471,7 +472,7 @@ already correct for this lab:
 | `APP_SECRET_KEY` | generate your own: `python3 -c "import secrets; print(secrets.token_hex(32))"` |
 | `AUTH0_CLIENT_ID` / `AUTH0_CLIENT_SECRET` / `AUTH0_DOMAIN` | same Auth0 app as 5.3.1 |
 | `AUTH0_AUDIENCE` | leave `https://agentcore-lab-api` — same value as the AgentCore Deployment .env |
-| `AUTH0_SCOPE` | leave the default — must include `create:me:connected_accounts`, already the case in `env.template` |
+| `AUTH0_SCOPE` | leave the default — must include `create:me:connected_accounts`, already the case in `chatWebApp/env.template` |
 | `CONNECTED_ACCOUNT_SCOPE` | leave the default (`openid profile email offline_access okta.users.read`) — only works once the connection's own default scope also includes `okta.users.read` (5.3.3) |
 | `AUTH0_CONNECTION_NAME` | leave `okta-agentcore` — matches the connection Name you set in 5.3.3 |
 | `AWS_PROFILE` | same SSO profile name as the AgentCore Deployment .env (5.5.1) |
@@ -490,8 +491,8 @@ in 5.5, not static credentials.
 ```
 
 This checks the AWS SSO session for `AWS_PROFILE` (5.5.1), resolves a real Python
-3.10+, creates `registerAgent/.venv` on first run, installs
-`registerAgent/requirements.txt`, and runs `agentcore_deployment.py`, which:
+3.10+, creates `agentCoreDeployment/.venv` on first run, installs
+`agentCoreDeployment/requirements.txt`, and runs `agentcore_deployment.py`, which:
 
 - authenticates via `AWS_PROFILE` (SSO)
 - calls `Runtime.configure(...)` with a `customJWTAuthorizer` using `discoveryUrl`
@@ -499,7 +500,7 @@ This checks the AWS SSO session for `AWS_PROFILE` (5.5.1), resolves a real Pytho
   `allowedClients`
 - calls `Runtime.launch(env_vars=RUNTIME_ENV_VARS)`, pushing ~17 vars into the deployed
   container's environment
-- prints `AGENT_RUNTIME_ARN: <arn>` on success — copy this into the root `.env`'s
+- prints `AGENT_RUNTIME_ARN: <arn>` on success — copy this into `chatWebApp/.env`'s
   `AGENT_RUNTIME_ARN`
 
 **After first successful deploy, attach a DynamoDB IAM policy manually** — this is not
@@ -592,7 +593,7 @@ downstream of the Lambda.
 7. **Wire it into the agent**: note the Gateway's MCP endpoint URL — format:
    `https://<gateway-id>.gateway.bedrock-agentcore.<region>.amazonaws.com/mcp` — and set
    it as `MCP_GATEWAY_URL` in the **AgentCore Deployment .env**. No code changes are
-   needed: `registerAgent/agentcore_agent.py`'s `create_transport()` already connects
+   needed: `agentCoreDeployment/agentcore_agent.py`'s `create_transport()` already connects
    via `streamablehttp_client(MCP_GATEWAY_URL, headers={"Authorization": f"Bearer
    {access_token}"})`, sending the same Auth0 access token used elsewhere as the bearer
    credential; `strands_agent_bedrock`'s `MCPClient(create_transport)` context manager

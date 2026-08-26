@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Deploys the agent under registerAgent/ to AWS Bedrock AgentCore Runtime.
+# Deploys the agent under agentCoreDeployment/ to AWS Bedrock AgentCore Runtime.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR/registerAgent"
+cd "$SCRIPT_DIR/agentCoreDeployment"
 
 if [ ! -f .env ]; then
-    echo "registerAgent/.env not found — copy env.sample to .env and populate it first." >&2
+    echo "agentCoreDeployment/.env not found — copy env.sample to .env and populate it first." >&2
     exit 1
 fi
 
@@ -14,11 +14,11 @@ fi
 # CodeBuild deploy that would otherwise fail partway through with a stale-token error.
 AWS_PROFILE_VALUE="$(sed -n 's/^AWS_PROFILE=//p' .env | tail -n1)"
 if [ -z "$AWS_PROFILE_VALUE" ]; then
-    echo "AWS_PROFILE not set in registerAgent/.env — set it first (see env.sample)." >&2
+    echo "AWS_PROFILE not set in agentCoreDeployment/.env — set it first (see env.sample)." >&2
     exit 1
 fi
 if ! command -v aws >/dev/null 2>&1; then
-    echo "AWS CLI not found — install it first (see SETUP.md Section 3)." >&2
+    echo "AWS CLI not found — install it first (see README.md Section 3)." >&2
     exit 1
 fi
 export AWS_PROFILE="$AWS_PROFILE_VALUE"

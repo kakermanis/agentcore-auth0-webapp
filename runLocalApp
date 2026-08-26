@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Runs the FastAPI web app (app.py) locally.
+# Runs the FastAPI web app (chatWebApp/app.py) locally.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+cd "$SCRIPT_DIR/chatWebApp"
 
 if [ ! -f .env ]; then
-    echo ".env not found — copy env.template to .env and populate it first." >&2
+    echo "chatWebApp/.env not found — copy env.template to .env and populate it first." >&2
     exit 1
 fi
 
@@ -15,11 +15,11 @@ fi
 # in this shell with a live SSO session before uvicorn starts.
 AWS_PROFILE_VALUE="$(sed -n 's/^AWS_PROFILE=//p' .env | tail -n1)"
 if [ -z "$AWS_PROFILE_VALUE" ]; then
-    echo "AWS_PROFILE not set in .env — set it first (see env.template)." >&2
+    echo "AWS_PROFILE not set in chatWebApp/.env — set it first (see env.template)." >&2
     exit 1
 fi
 if ! command -v aws >/dev/null 2>&1; then
-    echo "AWS CLI not found — install it first (see SETUP.md Section 3)." >&2
+    echo "AWS CLI not found — install it first (see README.md Section 3)." >&2
     exit 1
 fi
 export AWS_PROFILE="$AWS_PROFILE_VALUE"
