@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Runs the FastAPI web app (app.py) locally.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+if [ ! -f .env ]; then
+    echo ".env not found — copy env.template to .env and populate it first." >&2
+    exit 1
+fi
+
+# The web app's DynamoDB client relies purely on boto3's default credential chain
+# (no access keys anywhere in this lab) -- that means AWS_PROFILE must be exported
+# in this shell with a live SSO session before uvicorn starts.
+AWS_PROFILE_VALUE="$(sed -n 's/^AWS_PROFILE=//p' .env | tail -n1)"
+if [ -z "$AWS_PROFILE_VALUE" ]; then
+    echo "AWS_PROFILE not set in .env — set it first (see env.template)." >&2
+    exit 1
+fi
+if ! command -v aws >/dev/null 2>&1; then
+    echo "AWS CLI not found — install it first (see SETUP.md Section 3)." >&2
+    exit 1
+fi
+export AWS_PROFILE="$AWS_PROFILE_VALUE"
+echo "Checking AWS SSO session for profile '$AWS_PROFILE'..."
+if ! aws sts get-caller-identity --profile "$AWS_PROFILE" >/dev/null 2>&1; then
+    echo "SSO session for '$AWS_PROFILE' is missing or expired — running 'aws sso login'..."
+    aws sso login --profile "$AWS_PROFILE"
+fi
+
+# Prefer a real Python 3.10+ (Homebrew) over macOS's ancient Command Line Tools python3.
+BASE_PYTHON="$(command -v python3.12 || command -v /opt/homebrew/opt/python@3.12/bin/python3.12 || command -v python3.11 || command -v python3.10 || command -v python3)"
+
+if [ ! -d .venv ]; then
+    "$BASE_PYTHON" -m venv .venv
+fi
+source .venv/bin/activate
+
+pip install -r requirements.txt
+uvicorn app:app --host 127.0.0.1 --port 5000 --reload

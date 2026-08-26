@@ -14,21 +14,21 @@ This folder holds the Register Agent assets and deployment helpers. The document
 ## Prerequisites
 
 - Python environment with dependencies from `requirements.txt` installed.
-- AWS credentials with permission to assume the AgentCore execution role, access ECR, DynamoDB, and Secrets Manager.
-- Secrets Manager secret `agentcore_auth0_aa-oynY7a` populated with the Auth0, Okta, and OpenFGA settings expected by `agentcore_agent.py`.
+- AWS credentials with permission to assume the AgentCore execution role, access ECR, and DynamoDB.
 - Auth0 tenant configured for both standard OAuth flows and CIBA.
 
 ## Setup
 
-1. Copy `env.sample` to `.env` in this directory and populate:
+1. Copy `env.sample` to `.env` in this directory and populate every value, including AWS,
+   Auth0, CIBA, FGA, and Okta settings:
    ```bash
    cp env.sample .env
-   # edit .env to add AWS, Auth0 values
+   # edit .env to add AWS, Auth0, CIBA, FGA, and Okta values
    ```
-2. Ensure the Secrets Manager secret contains:
-   - `AUTH0_DOMAIN_CIBA`, `CIBA_CLIENT_ID`, `CIBA_CLIENT_SECRET`, `CIBA_SCOPE`, `CIBA_BINDING_MESSAGE`
-   - `FGA_*` values (issuer, audience, client, secret, host, store, authorization model)
-   - `MCP_GATEWAY_URL`, `OKTA_DOMAIN`
+   `agentcore_deployment.py` reads these from `.env` and pushes them into the deployed
+   AgentCore Runtime's `environment_variables` config — there is no AWS Secrets Manager
+   step in this lab. `.env` itself is excluded from the Docker build via `.dockerignore`,
+   so it never ends up baked into the container image.
 
 ## Deploying with AgentCore
 

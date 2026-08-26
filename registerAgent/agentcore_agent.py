@@ -34,62 +34,60 @@ access_token=""
 
 app = BedrockAgentCoreApp()
 
-# Secrets Manager bundle that keeps Auth0, FGA, and Okta settings out of source.
-SECRETS_ARN = "arn:aws:secretsmanager:us-east-1:aaaaaaaaaaaa:secret:bbbbbbbbbbbb"
-
-def load_managed_secrets():
-    try:
-        session = boto3.session.Session()
-        sm = session.client("secretsmanager")
-        secret_value = sm.get_secret_value(SecretId=SECRETS_ARN)
-        payload = secret_value.get("SecretString")
-        if not payload:
-            return {}
-        secrets = json.loads(payload)
-        logger.info("Loaded secrets from %s", SECRETS_ARN)
-        return secrets
-    except Exception as e:
-        logger.warning("Unable to load secrets from %s: %s", SECRETS_ARN, e)
-        return {}
-
-MANAGED_SECRETS = load_managed_secrets()
-
+# Auth0, FGA, and Okta settings — read directly from the environment. Locally these come
+# from registerAgent/.env; when deployed, AgentCore Runtime injects them via its own
+# environment_variables config (set by agentcore_deployment.py at deploy time).
+# CIBA reuses the same Auth0 application as the main login/JWT-authorizer flow (per the
+# blog: ticking the Token Vault + CIBA grant checkboxes on that one app) — so these read
+# straight off AUTH0_DOMAIN/AUTH0_CLIENT_ID/AUTH0_CLIENT_SECRET rather than separate vars.
 CIBA_AUTH0_DOMAIN = (
-    MANAGED_SECRETS.get("AUTH0_DOMAIN_CIBA", "")
+    os.getenv("AUTH0_DOMAIN", "")
     .replace("https://", "")
     .replace("http://", "")
     .strip("/")
 )
 if not CIBA_AUTH0_DOMAIN:
-    raise ValueError("AUTH0_DOMAIN_CIBA must be configured via Secrets Manager.")
+    raise ValueError("AUTH0_DOMAIN must be configured via the .env file.")
 
-CIBA_CLIENT_ID = MANAGED_SECRETS.get("CIBA_CLIENT_ID", "")
-CIBA_CLIENT_SECRET = MANAGED_SECRETS.get("CIBA_CLIENT_SECRET", "")
-CIBA_SCOPE = MANAGED_SECRETS.get("CIBA_SCOPE", "openid profile")
-DEFAULT_BINDING_MESSAGE = MANAGED_SECRETS.get("CIBA_BINDING_MESSAGE", "RESET PASSWORD FLOW")
+CIBA_CLIENT_ID = os.getenv("AUTH0_CLIENT_ID", "")
+CIBA_CLIENT_SECRET = os.getenv("AUTH0_CLIENT_SECRET", "")
+CIBA_SCOPE = os.getenv("CIBA_SCOPE", "openid profile")
+DEFAULT_BINDING_MESSAGE = os.getenv("CIBA_BINDING_MESSAGE", "RESET PASSWORD FLOW")
 ciba_url = f"https://{CIBA_AUTH0_DOMAIN}/bc-authorize"
 token_url = f"https://{CIBA_AUTH0_DOMAIN}/oauth/token"
 
-FGA_API_ISSUER = MANAGED_SECRETS.get("FGA_API_ISSUER", "")
-FGA_API_AUDIENCE = MANAGED_SECRETS.get("FGA_API_AUDIENCE", "")
-FGA_CLIENT_ID = MANAGED_SECRETS.get("FGA_CLIENT_ID", "")
-FGA_CLIENT_SECRET = MANAGED_SECRETS.get("FGA_CLIENT_SECRET", "")
-FGA_API_SCHEME = MANAGED_SECRETS.get("FGA_API_SCHEME", "https")
-FGA_API_HOST = MANAGED_SECRETS.get("FGA_API_HOST", "")
-FGA_STORE_ID = MANAGED_SECRETS.get("FGA_STORE_ID", "")
-FGA_AUTHORIZATION_MODEL_ID = MANAGED_SECRETS.get("FGA_AUTHORIZATION_MODEL_ID", "")
-MCP_GATEWAY_URL= MANAGED_SECRETS.get("MCP_GATEWAY_URL")
-OKTA_DOMAIN = MANAGED_SECRETS.get("OKTA_DOMAIN", "kapil.oktapreview.com")
+FGA_API_TOKEN_ISSUER = os.getenv("FGA_API_TOKEN_ISSUER", "")
+FGA_API_AUDIENCE = os.getenv("FGA_API_AUDIENCE", "")
+FGA_CLIENT_ID = os.getenv("FGA_CLIENT_ID", "")
+FGA_CLIENT_SECRET = os.getenv("FGA_CLIENT_SECRET", "")
+# Not part of FGA's own config output (always "https" in practice) — kept as its own
+# var since the OpenFGA SDK wants scheme and host passed separately.
+FGA_API_SCHEME = os.getenv("FGA_API_SCHEME", "https")
+FGA_API_HOST = (
+    os.getenv("FGA_API_URL", "")
+    .replace("https://", "")
+    .replace("http://", "")
+    .strip("/")
+)
+FGA_STORE_ID = os.getenv("FGA_STORE_ID", "")
+FGA_MODEL_ID = os.getenv("FGA_MODEL_ID", "")
+MCP_GATEWAY_URL = os.getenv("MCP_GATEWAY_URL")
+OKTA_DOMAIN = (
+    os.getenv("OKTA_DOMAIN", "kapil.oktapreview.com")
+    .replace("https://", "")
+    .replace("http://", "")
+    .strip("/")
+)
 
 
 logger.info("CIBA_CLIENT_ID: %s", CIBA_CLIENT_ID) 
 # --- DynamoDB Helper ---
-def get_dynamodb_table(region="us-east-1"):
+def get_dynamodb_table(region=None):
     """Helper function to get the DynamoDB table resource."""
-    table_name = "auth0_agentcore_agent" # Using table name directly
+    table_name = os.getenv("SESSION_TABLE_NAME")
     if not table_name:
         raise ValueError("SESSION_TABLE_NAME not configured")
-    dynamodb = boto3.resource("dynamodb", region_name=region)
+    dynamodb = boto3.resource("dynamodb", region_name=region or os.getenv("AWS_REGION", "us-east-1"))
     return dynamodb.Table(table_name)
 # ----------------------
 
@@ -102,7 +100,7 @@ async def main(user_obj):
     credentials = Credentials(
         method="client_credentials",
         configuration=CredentialConfiguration(
-            api_issuer=FGA_API_ISSUER,
+            api_issuer=FGA_API_TOKEN_ISSUER,
             api_audience=FGA_API_AUDIENCE,
             client_id=FGA_CLIENT_ID,
             client_secret=FGA_CLIENT_SECRET,
@@ -113,7 +111,7 @@ async def main(user_obj):
         api_scheme=FGA_API_SCHEME,
         api_host=FGA_API_HOST,
         store_id=FGA_STORE_ID,
-        authorization_model_id=FGA_AUTHORIZATION_MODEL_ID,
+        authorization_model_id=FGA_MODEL_ID,
         credentials=credentials,
     )
 
@@ -179,8 +177,8 @@ def invokeCiba(user_identifier: str = "", scope: str = "", binding_message: str 
         "client_id": CIBA_CLIENT_ID,
         "client_secret": CIBA_CLIENT_SECRET,
         "login_hint": json.dumps(login_hint),
-        "scope": "openid profile",
-        "binding_message": "Please approve the password-reset request"
+        "scope": scope or CIBA_SCOPE,
+        "binding_message": binding_message or DEFAULT_BINDING_MESSAGE,
     }
 
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
@@ -278,7 +276,7 @@ def getOktaGroups():
     try:
         user_for_check = {
             "user": email,
-            "relation": "read_groups",
+            "relation": "read_okta",
             "object": "okta:groups",
         }
         logger.info("Authorization check payload: %s", user_for_check)
@@ -324,6 +322,7 @@ def getOktaGroups():
         user_response = requests.get(user_url, headers=headers)
         logger.info("User lookup status: %s", user_response.status_code)
         logger.info("User response: %s", user_response.text)
+        logger.info("User response headers: %s", dict(user_response.headers))
         if user_response.status_code != 200:
             logger.error("Error retrieving user: %s - %s", user_response.status_code, user_response.text)
             actiongroup_output = f"Error retrieving user: {user_response.status_code}"
@@ -349,7 +348,7 @@ def getOktaGroups():
 
 
 # --- Agent Definition ---
-model_id = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+model_id = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0")
 model = BedrockModel(
     model_id=model_id,
     streaming=False
@@ -389,6 +388,21 @@ def strands_agent_bedrock(payload):
     except Exception as e:
         logger.error("Error fetching access_token from DynamoDB: %s", e)
 
+    system_prompt = (
+        "You are a helpful assistant with specific tools. Follow these rules carefully:\n"
+        "1.  **For Okta groups:** When the user asks to get Okta groups (e.g., 'get me okta groups', 'what are my okta groups'), "
+        "you MUST call the `getOktaGroups` tool and return ONLY its result.\n"
+
+        "2.  **For Password Resets:** When a user asks to perform an elevated operation like resetting a password "
+        "(e.g., 'reset my password', 'I need to reset a password', 'reset okta password for <email>'), "
+        "you MUST call the `invokeCiba` tool, wait for it to complete, and return ONLY the tool's result.\n"
+
+        "3.  **You also have access to **dynamic remote tools**. If a user asks about 'employee tasks', 'assigned work', "
+        "or 'employee records', look through your available tools for a match and invoke it immediately.\n"
+
+        "4. **For other tasks:** You can also do simple math calculations and tell the weather."
+    )
+
     try:
         with MCPClient(create_transport) as mcp_client:
             remote_tools = mcp_client.list_tools_sync()
@@ -397,23 +411,8 @@ def strands_agent_bedrock(payload):
             # NOTE: remote tool availability is dynamic per MCP session.
             agent = Agent(
                 model=model,
-                # *** UPDATED TOOL LIST ***
                 tools=[weather, getOktaGroups, invokeCiba]+remote_tools,
-                system_prompt=(
-                    "You are a helpful assistant with specific tools. Follow these rules carefully:\n"
-                    "1.  **For Okta groups:** When the user asks to get Okta groups (e.g., 'get me okta groups', 'what are my okta groups'), "
-                    "you MUST call the `getOktaGroups` tool and return ONLY its result.\n"
-
-                    "2.  **For Password Resets:** When a user asks to perform an elevated operation like resetting a password "
-                    "(e.g., 'reset my password', 'I need to reset a password', 'reset okta password for <email>'), "
-                    "you MUST call the `invokeCiba` tool, wait for it to complete, and return ONLY the tool's result.\n"
-
-                    "3.  **You also have access to **dynamic remote tools**. If a user asks about 'employee tasks', 'assigned work', "
-                    "or 'employee records', look through your available tools for a match and invoke it immediately.\n"
-
-                    "4. **For other tasks:** You can also do simple math calculations and tell the weather."
-
-                ),
+                system_prompt=system_prompt,
                 tool_executor=SequentialToolExecutor()
             )
 
@@ -421,13 +420,16 @@ def strands_agent_bedrock(payload):
             return resp.message['content'][0]['text']
     except Exception as e:
         logger.error("MCP Initialization failed: %s", e)
-        # Fallback: try to answer with local tools if MCP fails
+        # Fallback: answer with local tools only, since the MCP/Gateway connection
+        # that would have supplied remote_tools never succeeded.
+        agent = Agent(
+            model=model,
+            tools=[weather, getOktaGroups, invokeCiba],
+            system_prompt=system_prompt,
+            tool_executor=SequentialToolExecutor()
+        )
         resp = agent(user_input)
         return resp.message['content'][0]['text']
-
-
-    resp = agent(user_input)
-    return resp.message['content'][0]['text']
 
 if __name__ == "__main__":
     app.run()

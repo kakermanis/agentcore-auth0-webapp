@@ -57,15 +57,18 @@ AUTH0_SECRET = require_env("AUTH0_SECRET")
 
 APP_BASE_URL =  os.getenv("APP_BASE_URL", "http://127.0.0.1:5000").rstrip("/")
 AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE")
-AUTH0_SCOPE = "openid profile email offline_access read:me:connected_accounts " 
+AUTH0_SCOPE = os.getenv(
+    "AUTH0_SCOPE",
+    "openid profile email offline_access read:me:connected_accounts create:me:connected_accounts",
+)
 CONNECTED_ACCOUNT_SCOPE = os.getenv(
-     "myaccount:manage_connections",
-     "openid profile email offline_access"
+    "CONNECTED_ACCOUNT_SCOPE",
+    "openid profile email offline_access"
 )
 AUTH0_CONNECTION_NAME = os.getenv("AUTH0_CONNECTION_NAME")
 
 AUTH0_BASE_URL = f"https://{AUTH0_DOMAIN}"
-MYACCOUNT_BASE_URL = "https://smalser5.eu.auth0.com"
+MYACCOUNT_BASE_URL = AUTH0_BASE_URL
 AUTH0_AUTH_PARAMS = {
     "scope": AUTH0_SCOPE,
     "audience": AUTH0_AUDIENCE,

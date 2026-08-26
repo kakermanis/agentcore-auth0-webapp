@@ -10,7 +10,6 @@ from typing import Any, Dict, Optional, Tuple
 import boto3
 import requests
 from dotenv import load_dotenv
-from auth0.authentication import GetToken
 from auth0_fastapi.auth import AuthClient
 from auth0_fastapi.config import Auth0Config
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -30,20 +29,21 @@ AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN")
 AUTH0_BASE_URL = f"https://{AUTH0_DOMAIN}"
 AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE")
 SESSION_TABLE_NAME = os.getenv("SESSION_TABLE_NAME")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 AUTH0_SECRET = os.getenv("AUTH0_SECRET", "")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:5000").rstrip("/")
  
-AUTH0_SCOPE = "openid profile email offline_access okta.users.read read:me:connected_accounts " 
-AUTH0_SECRET = os.getenv("AUTH0_SECRET")
-
-
-CONNECTED_ACCOUNT_SCOPE = os.getenv(
-     "myaccount:manage_connections",
-     "openid profile email offline_access okta.users.read"
+AUTH0_SCOPE = os.getenv(
+    "AUTH0_SCOPE",
+    "openid profile email offline_access okta.users.read read:me:connected_accounts create:me:connected_accounts",
 )
 
-AUTH0_BASE_URL = f"https://{AUTH0_DOMAIN}"
-MYACCOUNT_BASE_URL = "https://smalser5.eu.auth0.com"
+CONNECTED_ACCOUNT_SCOPE = os.getenv(
+    "CONNECTED_ACCOUNT_SCOPE",
+    "openid profile email offline_access okta.users.read"
+)
+
+MYACCOUNT_BASE_URL = AUTH0_BASE_URL
 AUTH0_AUTH_PARAMS = {
     "scope": AUTH0_SCOPE,
     "audience": AUTH0_AUDIENCE,
@@ -53,12 +53,7 @@ AUTH0_AUTH_PARAMS = {
 AUTH0_CONNECTION_NAME = os.getenv("AUTH0_CONNECTION_NAME")
 
 
-dynamodb = boto3.resource(
-    "dynamodb",
-    region_name="us-east-1",
-    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-)
+dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 
 AGENT_RUNTIME_ARN = os.getenv("AGENT_RUNTIME_ARN")
 
@@ -141,10 +136,16 @@ async def fetch_federated_tokens(request: Request, access_token: Optional[str] =
 
     # 2. Fetch connected accounts
     try:
-        # Use the MyAccount API to see what's linked
+        # The MyAccount API needs a token audienced/scoped for itself, not the
+        # session's general access_token (same fix as start_connect_account below).
+        myaccount_token = await auth_client.client.get_access_token(
+            audience=f"{MYACCOUNT_BASE_URL}/me/",
+            scope="read:me:connected_accounts",
+            store_options=_store_options(request, state_response),
+        )
         url = f"{MYACCOUNT_BASE_URL}/me/v1/connected-accounts/accounts"
-        headers = {"Authorization": f"Bearer {access_token}"}
-        
+        headers = {"Authorization": f"Bearer {myaccount_token}"}
+
         resp = requests.get(url, headers=headers, timeout=10)
         resp.raise_for_status()
         data = resp.json()
@@ -490,7 +491,7 @@ async def chat_page(request: Request):
                         return JSONResponse(error_payload, status_code=401)
                     raise HTTPException(status_code=401, detail=error_payload["response"])
 
-                #bearer_token = get_bearer_token() 
+                #bearer_token = get_bearer_token()
                 bearer_token = session_store.get("access_token")
                 agent_runtime_arn_encoded = urllib.parse.quote(AGENT_RUNTIME_ARN, safe="")
                 
@@ -498,14 +499,15 @@ async def chat_page(request: Request):
                 
 
                 escaped_agent_arn = urllib.parse.quote(invoke_agent_arn, safe='')
-                url = f"https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/{escaped_agent_arn}/invocations?qualifier=DEFAULT"
+                url = f"https://bedrock-agentcore.{AWS_REGION}.amazonaws.com/runtimes/{escaped_agent_arn}/invocations?qualifier=DEFAULT"
 
                 headers = {
                     "Authorization": f"Bearer {bearer_token}",
                     "Content-Type": "application/json",
-                    "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": session_store
-                    .get("profile", {})
-                    .get("user_id", "default-session"),
+                    # AWS requires runtimeSessionId to be >= 33 chars - Auth0's user_id
+                    # ("auth0|" + 24 hex chars = 30 chars) is too short. session_id is a
+                    # UUID4 (36 chars) and is already validated non-empty above.
+                    "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": session_id,
                 }
                 response = requests.post(
                     url,
@@ -536,7 +538,11 @@ async def chat_page(request: Request):
                     return JSONResponse({"response": response_text, "success": True})
 
             except requests.exceptions.HTTPError as exc:
-                logging.exception("Agent Core API error: %s", exc)
+                logging.exception(
+                    "Agent Core API error: %s | response body: %s",
+                    exc,
+                    exc.response.text if exc.response is not None else "<no response>",
+                )
                 error_msg = f"Agent Core API error: {str(exc)}"
                 if wants_json:
                     return JSONResponse({"response": error_msg, "success": False}, status_code=500)
@@ -664,4 +670,4 @@ def extract_response_text(response: Any) -> str:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("app:app", host="0.0.0.0", port=5000, reload=True)
+    uvicorn.run("app:app", host="127.0.0.1", port=5000, reload=True)
