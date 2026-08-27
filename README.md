@@ -346,14 +346,15 @@ own `.env`.
      Authentication).
 2. **Custom API for `AUTH0_AUDIENCE`**: Applications → APIs → Create API. Name it
    `SESummitAPI`, identifier (the `aud` claim) exactly `https://agentcore-lab-api` —
-   this matches the default already in `chatWebApp/env.template` and `agentCoreDeployment/env.sample`,
-   so using it as-is means nothing needs editing later. No scopes required.
+   this matches the default already in `chatWebApp/env.template` and `agentCoreDeployment/env.sample`. 
+   Go down to Access Settings and enable "Allow Offline Access". No scopes required. 
 3. **Enterprise connection to Okta**: Authentication → Enterprise → add an OIDC
    connection. Create it as an OIDC-based Enterprise Connection within your Auth0
    tenant, named exactly `okta-agentcore`.
    - Discovery URL: `https://{your-okta-domain}/.well-known/openid-configuration`.
    - Client ID/Secret: from the Okta OIDC app created in 5.2.
    - Request `offline_access` (Token Vault needs a refresh token to redeem later).
+   - Ensure "Display connection as a button" is checked
    - Set this connection's own default **Scope** field to include `okta.users.read`.
      This is a normal Dashboard field on the connection's own configuration screen (not
      a Management API/CLI-only setting) — set it here, at connection creation/edit time.
@@ -371,7 +372,7 @@ own `.env`.
    - Back in Okta: add `https://{AUTH0_DOMAIN}/login/callback` to the Okta app's
      Sign-in redirect URIs.
 4. **MyAccount API**: Auth0 Dashboard → activate the My Account API, authorize
-   `AgentCoreLabWebApp`, select all Connected Accounts scopes.
+   `AgentCoreLabWebApp`, That will create a new API called "Auth0 My Account API", navigate to the API detail page, on the "settings" tab, turn off "Require 2FA". Then on the "Application Access" tab, grant all User-delegated Access permissions for the `AgentCoreLabWebApp` app.
 5. **MRRT (Multi-Resource Refresh Token) policy**: go to the `AgentCoreLabWebApp`
    application page, scroll down to **Multi-Resource Refresh Token**, and click **Edit
    Configuration**. Enable it for **both** the Auth0 My Account API and `SESummitAPI`
@@ -414,16 +415,12 @@ own `.env`.
    > user (5.3.6) — all three need to line up on one email for the demo to work.
 4. **Authorized Clients**: go to **Store Settings** → **Authorized Clients** →
    **+ Create Client**. Name it `SESummitAgent`. Under **Client Authorization**, check
-   the permission boxes for **Read and Query**, **Write**, and **Write and Delete**.
-   > I haven't independently verified these are the exact box labels FGA's UI shows —
-   > confirm the wording matches what you actually see before relying on this.
+   the permission boxes for **Read/Write model, changes, and assertions**, **Write and delete tuples**, and **Read and query**.
    Save the resulting Client ID/Secret → **AgentCore Deployment .env**:
-   `FGA_CLIENT_ID`, `FGA_CLIENT_SECRET`.
-5. Go to **Store Settings** and copy: **API URL**, **Store ID**, **Model ID**, **API
-   Token Issuer**, **API Audience** → all into **AgentCore Deployment .env** as
-   `FGA_API_URL`, `FGA_STORE_ID`, `FGA_MODEL_ID`, `FGA_API_TOKEN_ISSUER`,
-   `FGA_API_AUDIENCE` respectively (matching names, direct paste). FGA config is only
-   used by the agent, not the web app — none of these go into the Web App .env.
+   `FGA_CLIENT_ID`, `FGA_CLIENT_SECRET`. Also on the FGA Client detail page copy the API Token Issuer and API Audience values → **AgentCore Deployment .env**:`FGA_API_TOKEN_ISSUER`,`FGA_API_AUDIENCE`
+5. Go to **Store Settings** and copy: **API URL**, **Store ID**, **Model ID** → all into **AgentCore Deployment .env** as
+   `FGA_API_URL`, `FGA_STORE_ID`, `FGA_MODEL_ID` respectively (matching names, direct paste).
+   FGA config is only used by the agent, not the web app — none of these go into the Web App .env.
 
 ### 5.5 AWS setup
 
@@ -519,7 +516,7 @@ data until you do this by hand:
    }
    ```
    substituting your actual region, account ID, and `agentcore-lab-sessions` (or
-   whatever you named the table in 5.5.4).
+   whatever you named the table in 5.5.2).
 
 ### 5.9 Run the web app
 
