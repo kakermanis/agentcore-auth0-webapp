@@ -58,10 +58,19 @@ RUNTIME_ENV_VARS["AWS_REGION"] = region
 agentcore_runtime = Runtime()
 agent_name = "agentcore_agent_a4aa"
 
+# Execution role is created by infrastructure/templates/02-agent-execution-role.yaml
+# (see infrastructure/deployInfra) rather than auto-created here, so its DynamoDB grant
+# can be attached before first deploy instead of by hand afterward.
+execution_role = os.getenv("AGENT_EXECUTION_ROLE_ARN")
+if not execution_role:
+    raise ValueError("AGENT_EXECUTION_ROLE_ARN not found. Deploy "
+                      "infrastructure/templates/02-agent-execution-role.yaml (via "
+                      "infrastructure/deployInfra) and set this to its ExecutionRoleArn output.")
+
 # Configure the AgentCore deployment for the agentcore_agent entrypoint.
 response = agentcore_runtime.configure(
     entrypoint="agentcore_agent.py",
-    auto_create_execution_role=True,
+    execution_role=execution_role,
     auto_create_ecr=True,
     requirements_file="requirements.txt",
     region=region,
@@ -80,7 +89,12 @@ response = agentcore_runtime.configure(
 try:
     # Trigger the deployment for the agentcore_agent configuration.
     launch_result = agentcore_runtime.launch(env_vars=RUNTIME_ENV_VARS)
-    print('AGENT_RUNTIME_ARN:', launch_result.agent_arn)
+    print('*********************************************************************************')
+    print('***** Copy the next line to Web App .env file located at chatWebApp/.env. *****')
+    print('')
+    print('AGENT_RUNTIME_ARN=',launch_result.agent_arn)
+    print('')
+    print('*********************************************************************************')    
 except Exception as e:
     print('Error launching AgentCore runtime:', repr(e))
     print('Traceback:')

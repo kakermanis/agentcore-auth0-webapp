@@ -1,0 +1,169 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Execution role for the AgentCore Runtime (README.md Section 5.8). Replaces
+  auto_create_execution_role=True in agentcore_deployment.py plus the "attach a
+  DynamoDB IAM policy manually" step. The baseline (non-DynamoDB) statements below were
+  copied verbatim from a live role the bedrock_agentcore_starter_toolkit auto-generated
+  in this account, then parameterized by account/region/agent name — this is what
+  Runtime.configure(auto_create_execution_role=True) creates for you today; we're just
+  creating it ourselves so the DynamoDB grant can be attached before first deploy
+  instead of after.
+
+Parameters:
+  AgentName:
+    Type: String
+    Default: agentcore_agent_a4aa
+    Description: >
+      Must match the agent_name in agentCoreDeployment/agentcore_deployment.py — the
+      execution policy below is scoped to this name via ECR repo, log group, and
+      workload-identity ARN patterns, matching how the toolkit itself scopes the role
+      it would otherwise auto-create.
+  RoleName:
+    Type: String
+    Default: SESummitAgentCoreExecutionRole
+
+Resources:
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AssumeRolePolicy
+            Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*"
+      Policies:
+        - PolicyName: !Sub "BedrockAgentCoreRuntimeExecutionPolicy-${AgentName}"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ECRImageAccess
+                Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource:
+                  - !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/bedrock-agentcore-${AgentName}"
+              - Effect: Allow
+                Action:
+                  - logs:DescribeLogStreams
+                  - logs:CreateLogGroup
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*"
+              - Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*"
+              - Sid: ECRTokenAccess
+                Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource:
+                  - "*"
+              - Effect: Allow
+                Resource: "*"
+                Action: cloudwatch:PutMetricData
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: bedrock-agentcore
+              - Sid: CloudWatchLogsPutResourcePolicy
+                Effect: Allow
+                Action:
+                  - logs:PutResourcePolicy
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/${AgentName}-*"
+              - Sid: BedrockAgentCoreIdentityGetResourceApiKey
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:GetResourceApiKey
+                Resource:
+                  - !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:token-vault/default"
+                  - !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:token-vault/default/apikeycredentialprovider/*"
+                  - !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default"
+                  - !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default/workload-identity/*"
+              - Sid: BedrockAgentCoreIdentityGetCredentialProviderClientSecret
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bedrock-agentcore-identity!default/oauth2/*"
+                  - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bedrock-agentcore-identity!default/apikey/*"
+              - Sid: BedrockAgentCoreIdentityGetResourceOauth2Token
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:GetResourceOauth2Token
+                Resource:
+                  - !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:token-vault/default"
+                  - !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:token-vault/default/oauth2credentialprovider/*"
+                  - !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default"
+                  - !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default/workload-identity/${AgentName}-*"
+              - Sid: BedrockModelInvocation
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                  - bedrock:ApplyGuardrail
+                Resource:
+                  - "arn:aws:bedrock:*::foundation-model/*"
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:*"
+              - Sid: MarketplaceSubscribeOnFirstCall
+                Effect: Allow
+                Action:
+                  - aws-marketplace:ViewSubscriptions
+                  - aws-marketplace:Subscribe
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:CalledViaLast: bedrock.amazonaws.com
+              - Sid: BedrockAgentCoreCodeInterpreter
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:StartCodeInterpreterSession
+                  - bedrock-agentcore:InvokeCodeInterpreter
+                  - bedrock-agentcore:StopCodeInterpreterSession
+                  - bedrock-agentcore:GetCodeInterpreter
+                  - bedrock-agentcore:GetCodeInterpreterSession
+                  - bedrock-agentcore:ListCodeInterpreterSessions
+                Resource:
+                  - !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:aws:code-interpreter/aws.codeinterpreter.v1"
+              - Sid: AwsJwtFederation
+                Effect: Allow
+                Action: sts:GetWebIdentityToken
+                Resource: "*"
+        - PolicyName: SESummitDynamoDB
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                Resource: !ImportValue SESummitAgentCoreSessionTableArn
+
+Outputs:
+  ExecutionRoleArn:
+    Value: !GetAtt ExecutionRole.Arn
+  ExecutionRoleName:
+    Value: !Ref ExecutionRole

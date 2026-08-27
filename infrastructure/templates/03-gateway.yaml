@@ -1,0 +1,155 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Mock "get_tasks" Lambda + AgentCore Gateway + GatewayTarget (README.md Section 5.10).
+  Replaces the "built by hand in the AWS console" Lambda-ARN Gateway target. The
+  Lambda's code is the exact handler from README 5.10.1; the GatewayTarget's tool
+  schema is the exact get_tasks definition from README 5.10.4.
+
+Parameters:
+  GatewayName:
+    Type: String
+    Default: sesummit-mock-gateway
+    Description: >
+      Lowercase by convention: AgentCore appends a random suffix to this name to form
+      the actual gatewayId (e.g. "sesummit-mock-gateway-abc123xyz"), and the service
+      role's own policies below match against "${GatewayName}-*" to authorize against
+      that future ID before the Gateway resource exists.
+  AuthDomain:
+    Type: String
+    Description: >
+      Auth0 tenant domain, bare (no scheme) - e.g. your-tenant.auth0.com. Matches
+      AUTH0_DOMAIN in agentCoreDeployment/.env.
+  AuthClientId:
+    Type: String
+    Description: >
+      The Auth0 application's Client ID (AUTH0_CLIENT_ID in agentCoreDeployment/.env).
+      Checked against the azp claim on inbound tokens - see README Section 5.10.5 for
+      why azp, not client_id/allowedClients, is the correct check for Auth0 tokens.
+
+Resources:
+  MockTasksFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  MockTasksFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Role: !GetAtt MockTasksFunctionRole.Arn
+      Timeout: 3
+      Code:
+        ZipFile: |
+          import json
+          def lambda_handler(event, context):
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': 'Tasks retrieved successfully',
+                      'Task ID': "task1",
+                      'Task Description': 'Update the OAuth Flow with XAA details'
+                  })
+              }
+
+  GatewayServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AmazonBedrockAgentCoreGatewayBasePolicyProd
+            Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:gateway/${GatewayName}-*"
+      Policies:
+        - PolicyName: AmazonBedrockAgentCoreGatewayBasePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: GetGateway
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:GetGateway
+                Resource:
+                  - !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:gateway/${GatewayName}-*"
+              - Sid: GetConfigurationBundleVersion
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:GetConfigurationBundleVersion
+                Resource:
+                  - !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:configuration-bundle/*"
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount: "${aws:PrincipalAccount}"
+                    aws:RequestedRegion: !Ref AWS::Region
+        - PolicyName: AmazonBedrockAgentCoreGatewayLambdaInvoke
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AmazonBedrockAgentCoreGatewayLambdaProd
+                Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt MockTasksFunction.Arn
+
+  Gateway:
+    Type: AWS::BedrockAgentCore::Gateway
+    Properties:
+      Name: !Ref GatewayName
+      ProtocolType: MCP
+      AuthorizerType: CUSTOM_JWT
+      RoleArn: !GetAtt GatewayServiceRole.Arn
+      AuthorizerConfiguration:
+        CustomJWTAuthorizer:
+          DiscoveryUrl: !Sub "https://${AuthDomain}/.well-known/openid-configuration"
+          CustomClaims:
+            - InboundTokenClaimName: azp
+              InboundTokenClaimValueType: STRING
+              AuthorizingClaimMatchValue:
+                ClaimMatchOperator: EQUALS
+                ClaimMatchValue:
+                  MatchValueString: !Ref AuthClientId
+
+  GatewayTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Properties:
+      GatewayIdentifier: !Ref Gateway
+      Name: get-tasks-lambda-target
+      CredentialProviderConfigurations:
+        - CredentialProviderType: GATEWAY_IAM_ROLE
+      TargetConfiguration:
+        Mcp:
+          Lambda:
+            LambdaArn: !GetAtt MockTasksFunction.Arn
+            ToolSchema:
+              InlinePayload:
+                - Name: get_tasks
+                  Description: Returns a set of tasks for IT Admin.
+                  InputSchema:
+                    Type: object
+                    Properties: {}
+                    Required: []
+
+Outputs:
+  GatewayUrl:
+    Value: !GetAtt Gateway.GatewayUrl
+  GatewayId:
+    Value: !GetAtt Gateway.GatewayIdentifier
+  LambdaArn:
+    Value: !GetAtt MockTasksFunction.Arn

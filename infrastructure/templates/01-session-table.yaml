@@ -1,0 +1,37 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  DynamoDB session table for the SE Summit AgentCore lab (README.md Section 5.5.2).
+  Replaces the manual "create a table by hand" step.
+
+Parameters:
+  TableName:
+    Type: String
+    Default: agentcore-lab-sessions
+    Description: >
+      Must match SESSION_TABLE_NAME in both agentCoreDeployment/.env and
+      chatWebApp/.env.
+
+Resources:
+  SessionTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref TableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: session_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: session_id
+          KeyType: HASH
+
+Outputs:
+  TableName:
+    Value: !Ref SessionTable
+    Export:
+      # Fixed export name (not derived from stack name) so 02-agent-execution-role.yaml
+      # can Fn::ImportValue it without needing to know what this stack was named.
+      Name: SESummitAgentCoreSessionTableName
+  TableArn:
+    Value: !GetAtt SessionTable.Arn
+    Export:
+      Name: SESummitAgentCoreSessionTableArn

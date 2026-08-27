@@ -179,17 +179,11 @@ sequenceDiagram
     Homebrew: `brew install git`.
   - Upgrade: `brew upgrade git` (if installed via Homebrew).
 
-- **Python 3.10+**
-  - Check: `python3 --version` and `which python3` — macOS ships only an ancient
-    Command Line Tools `python3`, which is **not** a real 3.10+ interpreter for this
-    purpose; you need a separate, real one on your `PATH` (typically via Homebrew).
-  - Install: `brew install python@3.12` (or `python@3.11` / `python@3.10`).
-  - Upgrade: `brew upgrade python@3.12` (etc., matching whichever formula you installed).
-  - Note: this repo's own helper scripts (`deployAgentCore`, `runLocalApp`)
-    auto-detect and prefer a Homebrew python3.12/3.11/3.10 over the system one, and
-    build their own `.venv` from it. So once at least one real 3.10+ interpreter
-    exists anywhere the scripts look, you don't need to manually select or activate
-    it yourself — you just need it present.
+- **Python 3**
+  - In a Terminal window:
+    - `brew install python@3.12`
+    - `echo 'export PATH="/opt/homebrew/opt/python@3.12/bin:$PATH"' >> ~/.zshrc`
+    - `source ~/.zshrc`
 
 - **AWS CLI v2**
   - Check: `aws --version` — confirm it reports `aws-cli/2.x`, not `1.x`. This lab's
@@ -215,15 +209,6 @@ sequenceDiagram
     the MRRT policy update via `auth0 apps update`): `auth0 login`, which walks you
     through a device-code flow in your browser against your tenant.
 
-A container engine (Docker/Finch/Podman) is **not** required for this lab's default
-deploy path — `./deployAgentCore` builds and deploys via AWS CodeBuild, not a local
-container build. You'd only need one for the optional `runtime.launch(local=True)`
-alternative deployment mode, which this guide does not use.
-
-Bedrock model access and a currently-available Claude model ID are also required, but
-that's a per-account/region configuration matter, not a CLI/SDK tooling install — see
-Section 4, "Bedrock model availability."
-
 ## 4. Areas to Look Out For
 
 This section is about small, easily-missed details in the *manual* setup steps below —
@@ -236,9 +221,7 @@ yourself.
   `-admin` console hostname (`<org>-admin.okta.com`). Hitting `/api/v1/...` against the
   `-admin` host returns a **403 with an empty body** — this looks like a permissions
   problem but is actually Okta's edge blocking an unsupported hostname/path
-  combination. (A genuine Okta API 403 has a JSON body like
-  `{"errorCode":"E0000006",...}` — an empty body on 403 is the tell.) Don't include a
-  scheme prefix either; the code strips `https://`/`http://` itself.
+  combination.
 
 ### Getting `okta.users.read` onto the federated token (two settings, both required)
 
@@ -283,13 +266,6 @@ value.
 
 Before starting here, ensure you have all the required tools and environments setup as outlined above in Section 3
 
-Throughout this section, **"Web App .env"** means the env file for the FastAPI web
-app (currently `chatWebApp/.env`, copied from `chatWebApp/env.template`), and **"AgentCore
-Deployment .env"** means the env file for the agent itself (currently
-`agentCoreDeployment/.env`, copied from `agentCoreDeployment/env.sample`). Whenever a step produces
-a value you need, this doc tells you which of the two files it goes into and under which
-variable name.
-
 ### 5.1 Clone and inspect
 
 ```bash
@@ -298,8 +274,14 @@ cd agentcore-auth0-webapp
 ```
 
 Two independent apps live here: `chatWebApp/`, the FastAPI web app, and
-`agentCoreDeployment/`, the AgentCore agent + its local-only deploy script. Each has its
-own `.env`.
+`agentCoreDeployment/`, the AgentCore agent + its deploy script.
+There is also a `infrastructure` folder which contains all the required AWS CloudFormation assets to automate their deployment.
+
+1. Copy the file `chatWebApp/env.template` into a new file called `chatWebApp/.env`. Throughout this setup guide, **"Web App .env"** means this .env file you just created and it is used for the WebApp client.
+2. Copy the file `agentCoreDeployment/env.template` into `agentCoreDeployment/.env`. Throughout this setup guide, **"AgentCore Deployment .env"** means thins env file and is used by the AgentCore agent itself.
+
+For all future steps, whenever a step produces
+a value needed in either one of these files, the doc tells you which file it goes into and under which variable name. Be sure to cut and paste them immediately.
 
 ### 5.2 Okta org setup
 
@@ -322,7 +304,7 @@ own `.env`.
 5. Note this app's Client ID/Secret, and your org's bare base domain — `<org>.okta.com`,
    with any `-admin` removed if present.
    - Client ID/Secret get pasted directly into the Auth0 enterprise connection you'll
-     create in 5.3.3 — they don't go into either `.env` file.
+     create in 5.3.3 — they don't go into either `.env` file, so be sure to save them somewhere safe for now.
    - The bare domain goes into **AgentCore Deployment .env** as `OKTA_DOMAIN`.
 
 ### 5.3 Auth0 tenant setup
@@ -429,14 +411,41 @@ there are no long-lived IAM access keys anywhere in this lab. Every AWS-touching
 here — the local deploy script, and the web app's own DynamoDB access — authenticates
 via an AWS SSO profile rather than static credentials.
 
-1. `aws configure sso` — one-time setup. This prompts for your SSO start URL and SSO
-   region, then the target account and role, and finally lets you name the resulting
-   profile. Whatever name you give it here goes into `AWS_PROFILE` in **both** the
-   Web App .env and the AgentCore Deployment .env — it must be the same profile name in
-   each.
-2. Create a DynamoDB table named exactly `agentcore-lab-sessions` (matches
-   `SESSION_TABLE_NAME`'s default in both `.env` templates), partition key
-   `session_id` (String), in the same region you'll deploy to (`us-west-2`).
+1. **Run `aws configure sso`** — one-time setup. This prompts for your SSO start URL and SSO 
+   region which you can get by going to your Okta Dashboard (https://okta.okta.com), search for AWS and select "AWS Corp: Business Technology". Expand the AWS account named similar to "okta-bt-gtm-<your okta username>" and click on the "Access keys" link. From there you can copy and paste the "SSO Start URL", "SSO Region". It will prompt you for:
+
+   - **SSO Session name**: `APJSESummit`
+   - **SSO start URL**: cut and paste from AWS access portal
+   - **SSO region**: cut and paste from AWS access portal
+   - **SSO registration scopes**: accept detfault
+   - It will pop out to a browser window asking you to grant access to botocore-client-APJSESummit, press `Allow access`
+   - Back in terminal, if you have multiple AWS Account, it will ask you to select which one you'd like to use, select okta-bt-gtm-<your user name>
+   - **Default client Region**: accept default
+   - **CLI default output format**: accept default
+   - **Profile name**: accept default
+   - It will show you your profile name which should be similar to `GTMUser-<bunch of numbers>`, copy that profile names into the variable called `AWS_PROFILE` in **both** the Web App .env and the AgentCore Deployment .env — it must be the same profile name in each.
+2. **Run `./deployInfra`** (repo root, alongside `deployAgentCore`/`runLocalApp`) — this
+   is automated via CloudFormation rather than a console click-through. It creates
+   three things in one run: the DynamoDB session table (this step), the agent's
+   execution role with its DynamoDB policy already attached (replaces the manual step
+   formerly in 5.8), and the mock Lambda + AgentCore Gateway + GatewayTarget (replaces
+   the manual console build formerly in 5.10).
+   - It'll prompt you for your SSO profile name (from 5.5.1) and the `AUTH0_DOMAIN`/
+     `AUTH0_CLIENT_ID` values from the Auth0 application you created in 5.3.1 — there's
+     nothing to copy these from yet at this point in the walkthrough, since
+     `agentCoreDeployment/.env` isn't populated until 5.6. If you've already exported
+     `AWS_PROFILE`/`AUTH0_DOMAIN`/`AUTH0_CLIENT_ID` in your shell, it uses those instead
+     of prompting.
+   - It deploys to whatever region `AWS_DEFAULT_REGION` (if exported) or your SSO
+     profile's own configured region resolves to — it does not assume any particular
+     region.
+   - See `infrastructure/templates/` for what each of the three CloudFormation stacks
+     actually creates, and the templates' own comments for how the execution role's
+     policy mirrors what `Runtime.configure(auto_create_execution_role=True)` would
+     otherwise auto-generate.
+   - At the end it prints `SESSION_TABLE_NAME`, `AGENT_EXECUTION_ROLE_ARN`, and
+     `MCP_GATEWAY_URL` — copy these into your `.env` files in Section 5.6 (and 5.7 for
+     `SESSION_TABLE_NAME`). It does not edit either `.env` file for you.
 
 ### 5.6 Populate the AgentCore Deployment .env
 
@@ -455,7 +464,8 @@ filling in; leave everything else as shipped:
 | `CIBA_SCOPE` / `CIBA_BINDING_MESSAGE` | leave the defaults, or customize the binding message shown on the user's push-approval device |
 | `FGA_API_URL`, `FGA_STORE_ID`, `FGA_MODEL_ID`, `FGA_API_TOKEN_ISSUER`, `FGA_API_AUDIENCE`, `FGA_CLIENT_ID`, `FGA_CLIENT_SECRET` | your FGA store's config output, 5.4.4/5.4.5 |
 | `FGA_API_SCHEME` | leave `https` |
-| `MCP_GATEWAY_URL` | filled in once you complete Gateway setup (5.10) |
+| `AGENT_EXECUTION_ROLE_ARN` | `ExecutionRoleArn` output from `./infrastructure/deployInfra`, 5.5.2 |
+| `MCP_GATEWAY_URL` | `GatewayUrl` output from `./infrastructure/deployInfra`, 5.5.2 |
 | `OKTA_DOMAIN` | bare Okta org domain from 5.2.5 — **not** the `-admin` host |
 | `BEDROCK_MODEL_ID` | `global.anthropic.claude-sonnet-5` by default — confirm it's still live before deploying (Section 6) |
 
@@ -487,8 +497,7 @@ in 5.5, not static credentials.
 ./deployAgentCore
 ```
 
-This checks the AWS SSO session for `AWS_PROFILE` (5.5.1), resolves a real Python
-3.10+, creates `agentCoreDeployment/.venv` on first run, installs
+This checks the AWS SSO session for `AWS_PROFILE` (5.5.1), creates `agentCoreDeployment/.venv` on first run, installs
 `agentCoreDeployment/requirements.txt`, and runs `agentcore_deployment.py`, which:
 
 - authenticates via `AWS_PROFILE` (SSO)
@@ -500,23 +509,13 @@ This checks the AWS SSO session for `AWS_PROFILE` (5.5.1), resolves a real Pytho
 - prints `AGENT_RUNTIME_ARN: <arn>` on success — copy this into `chatWebApp/.env`'s
   `AGENT_RUNTIME_ARN`
 
-**After first successful deploy, attach a DynamoDB IAM policy manually** — this is not
-automated. `auto_create_execution_role=True` creates the execution role itself but does
-not attach any DynamoDB permissions to it, so the agent will fail to read/write session
-data until you do this by hand:
-
-1. In the IAM console, find the auto-created role, named like
-   `AmazonBedrockAgentCoreSDKRuntime-<region>-<hash>`.
-2. Attach an inline (or managed) policy granting:
-   ```json
-   {
-     "Effect": "Allow",
-     "Action": ["dynamodb:GetItem", "dynamodb:PutItem"],
-     "Resource": "arn:aws:dynamodb:<region>:<account_id>:table/<your-session-table>"
-   }
-   ```
-   substituting your actual region, account ID, and `agentcore-lab-sessions` (or
-   whatever you named the table in 5.5.2).
+**The execution role and its DynamoDB policy are already handled** — `execution_role`
+in `agentcore_deployment.py` points at the role created by
+`infrastructure/templates/02-agent-execution-role.yaml` (via `./infrastructure/deployInfra`
+in 5.5.2), which already has the DynamoDB `GetItem`/`PutItem` grant attached. Nothing to
+do by hand here; this used to require finding an auto-created role
+(`AmazonBedrockAgentCoreSDKRuntime-<region>-<hash>`) in the IAM console and attaching a
+policy to it manually after first deploy — that's no longer necessary.
 
 ### 5.9 Run the web app
 
@@ -534,8 +533,12 @@ tasks"). It's part of what this lab demonstrates (an agent unifying directly-cod
 tools with dynamically-discovered remote tools behind one interface) and should be
 completed, not skipped.
 
-This repo has no Lambda/Gateway infrastructure code of its own — the whole thing is
-built by hand in the AWS console, following the blog.
+**This is already built** — `infrastructure/templates/03-gateway.yaml` (deployed via
+`./infrastructure/deployInfra` back in 5.5.2) creates the mock Lambda, the Gateway, and
+the GatewayTarget together. This used to be built by hand in the AWS console; it isn't
+anymore. If you haven't already, copy that run's `GatewayUrl` output into
+`MCP_GATEWAY_URL` in the **AgentCore Deployment .env** and re-deploy
+(`./deployAgentCore`) so it reaches the running container's environment.
 
 **Architecture note**: this is a Lambda-ARN Gateway target, not a real MCP server or an
 OpenAPI target. Gateway wraps a plain Lambda function using a "Target Schema" so the
@@ -543,61 +546,40 @@ agent can discover/call it as if it were an MCP tool. This matters because Lambd
 targets only support the Gateway's own IAM/SigV4 service role when invoking the
 function — they do **not** support Gateway-native OAuth token exchange / per-user
 delegation the way genuine MCP-server or OpenAPI target types do. The bearer token the
-agent sends is used for the Gateway's *inbound* auth (step 5 below), not for anything
-downstream of the Lambda.
+agent sends is used for the Gateway's *inbound* auth, not for anything downstream of the
+Lambda.
 
-1. **Create the mock Lambda**: AWS Lambda console → Create function, Python 3.x
-   runtime. Handler:
-   ```python
-   import json
-   def lambda_handler(event, context):
-       return {
-           'statusCode': 200,
-           'body': json.dumps({
-               'message': 'Tasks retrieved successfully',
-               'Task ID': "task1",
-               'Task Description': 'Update the OAuth Flow with XAA details'
-           })
-       }
-   ```
-   Note the resulting Lambda's ARN.
-2. **Create the Gateway**: Amazon Bedrock AgentCore console → Gateways → Create
-   Gateway. Give it any name.
-3. **Add a target**: within the Gateway, Target Type: **Lambda ARN**, paste the Lambda
-   ARN from step 1. Target Name: any identifier.
-4. **Target Schema** — the MCP tool definition exposed to the agent:
-   ```json
-   [
-     {
-       "name": "get_tasks",
-       "description": "Returns a set of tasks for IT Admin.",
-       "inputSchema": {
-         "type": "object",
-         "properties": {},
-         "required": []
-       }
-     }
-   ]
-   ```
-5. **Inbound Auth Configuration**: Discovery URL =
-   `https://{AUTH0_DOMAIN}/.well-known/openid-configuration`, plus a Custom Claim: Name
-   `azp`, Type `String`, Value = the Auth0 application's Client ID (from 5.3.1). This
-   parallels, but is configured separately from, the Runtime's own `customJWTAuthorizer`
-   (5.8).
-6. **Configure permissions**: use an existing service role, or let the console create a
-   new one — this is the role the Gateway itself assumes to invoke the Lambda (not
-   related to the per-user Auth0 token).
-7. **Wire it into the agent**: note the Gateway's MCP endpoint URL — format:
-   `https://<gateway-id>.gateway.bedrock-agentcore.<region>.amazonaws.com/mcp` — and set
-   it as `MCP_GATEWAY_URL` in the **AgentCore Deployment .env**. No code changes are
-   needed: `agentCoreDeployment/agentcore_agent.py`'s `create_transport()` already connects
-   via `streamablehttp_client(MCP_GATEWAY_URL, headers={"Authorization": f"Bearer
-   {access_token}"})`, sending the same Auth0 access token used elsewhere as the bearer
-   credential; `strands_agent_bedrock`'s `MCPClient(create_transport)` context manager
-   calls `list_tools_sync()` to pull in `get_tasks` as a remote tool alongside the local
-   ones.
-8. Re-deploy (`./deployAgentCore`) so the new `MCP_GATEWAY_URL` reaches the running
-   container's environment.
+What the template creates, for reference:
+- The mock Lambda (Python), with the exact handler this lab used to have you paste into
+  the console by hand — returns a single hardcoded task.
+- The Gateway's **Target Schema** — the MCP tool definition exposed to the agent:
+  ```json
+  [
+    {
+      "name": "get_tasks",
+      "description": "Returns a set of tasks for IT Admin.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    }
+  ]
+  ```
+- **Inbound Auth Configuration**: Discovery URL =
+  `https://{AUTH0_DOMAIN}/.well-known/openid-configuration`, plus a Custom Claim: Name
+  `azp`, Type `String`, Value = the Auth0 application's Client ID (from 5.3.1). This
+  parallels, but is configured separately from, the Runtime's own `customJWTAuthorizer`
+  (5.8).
+- The Gateway's own service role (the identity the Gateway assumes to invoke the
+  Lambda — unrelated to the per-user Auth0 token).
+
+No code changes are needed on the agent side:
+`agentCoreDeployment/agentcore_agent.py`'s `create_transport()` already connects via
+`streamablehttp_client(MCP_GATEWAY_URL, headers={"Authorization": f"Bearer
+{access_token}"})`, sending the same Auth0 access token used elsewhere as the bearer
+credential; `strands_agent_bedrock`'s `MCPClient(create_transport)` context manager calls
+`list_tools_sync()` to pull in `get_tasks` as a remote tool alongside the local ones.
 
 Test this in 5.11.
 
