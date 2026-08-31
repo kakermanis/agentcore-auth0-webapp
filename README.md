@@ -285,92 +285,92 @@ a value needed in either one of these files, the doc tells you which file it goe
 
 ### 5.2 Okta org setup
 
-1. Create/use a Workforce (starter) org.
-   - Create a new Okta user. Give them an email address you will **reuse for the Auth0
+1. Create/use a Workforce (starter) org and go to the okta Admin Console
+   - Admin Console --> Directory --> Groups, Create two groups: **Okta Group 1** and **Okta Group 2**.
+   - Under Admin Console --> Directory --> Perople, Create a new Okta user by clicking on the **Add person** button. Give them an email address you will **reuse for the Auth0
      user you create later** (end of Section 5.3) — the FGA tuple, the Okta group
      membership, and the Auth0 identity all need to line up on the same email address
-     for the demo to work end to end.
-   - Create two groups: **Okta Group 1** and **Okta Group 2**.
-   - Assign the user you just created to **Okta Group 2 only** — leave them out of Okta
+     for the demo to work end to end. Select to **Activate now**, Set a password that you will remember and uncheck **User must change password on first login**. Press the **Save** button.
+  -  If the new Person does not show up on the People screen, refresh the page, then click on the Name of the new User you've just created. Select the **Admin roles** tab, click on the **Add individual admin privileges** button, in the **Role** drop down, search for the **Super Administrator** role, and click **Save Changes**.
+  **-- NOTE --** Giving users Super Administrator permissions is NOT best practice and is being done to speed up configuration of this lab.
+   - On the user profile record, go to the **Groups** tabs and assign the user you just created to **Okta Group 2 only** — leave them out of Okta
      Group 1. This is what `getOktaGroups` returns later, and gives you a group you can
      use to demonstrate access via FGA vs. one you can't.
-2. Okta Admin Console → Applications → Create App Integration → **OIDC – Web
-   Application**, grant type **Authorization Code**. Name it `SESummitLabApp`.
-3. Enable the **Refresh Token** grant type on this app. This is separate from, and in
-   addition to, requesting the `offline_access` scope on the Auth0 connection in 5.3.3
-   — both are required (see Section 4).
-4. Leave the redirect URI blank for now; you'll add
-   `https://{AUTH0_DOMAIN}/login/callback` once you know your Auth0 domain (step 5.3.1).
-5. Note this app's Client ID/Secret, and your org's bare base domain — `<org>.okta.com`,
-   with any `-admin` removed if present.
-   - Client ID/Secret get pasted directly into the Auth0 enterprise connection you'll
+2. Okta Admin Console → Applications → Create App Integration → **OIDC – OpenID Connect**, Application Type **Web Application**, App integration name **`SESummitLabApp`**.
+3. Enable Grant type - core grants **Authorization Code & Refresh Token**
+
+4. Leave the **Sign-in redirect URI** blank for now, it will take the shape of `https://{AUTH0_DOMAIN}/login/callback`, also leave the **Sign-out redirect URI's** blank for now, it will take the shape of `https://{AUTH0_DOMAIN}/logout`. Once you know your Auth0 domain (step 5.3.1) come back and update these fields.
+
+5. In Assignments select **Allow everyone in your organization to access**, and press the **Save** button. 
+
+6. In the Client Credentials section, copy and temporarily save the **Client ID** as well as within the CLIENT SECRETS section, copy and temporarily save the **Client Secret**.
+   - Client ID & Client Secret get pasted directly into the Auth0 enterprise connection you'll
      create in 5.3.3 — they don't go into either `.env` file, so be sure to save them somewhere safe for now.
+7. Note your org's base domain — `<org>.okta.com` and remove any `-admin` if present in the URL. For example, the domain `demo-peach-salmon-30608-admin.okta.com` would translate to a base domain of `demo-peach-salmon-30608.okta.com`
    - The bare domain goes into **AgentCore Deployment .env** as `OKTA_DOMAIN`.
+
+8. On the **Okta API Scopes** tab of the **`SESummitLabApp`** app, grant scopes:
+  - okta.groups.read
+  - okta.users.read
+
 
 ### 5.3 Auth0 tenant setup
 
-1. **Application**: Applications → Create Application → Regular Web Application. Name
+1. **Auth0 Guardian Setup** Auth0 Dashboard → Security → Multi-factor Auth. Ensure `Push Notification using Auth0 Guardian` is Enabled.
+  - Pre-enroll the user you've just setup with Guardian by going to Auth0 Dashboard → User Management → Users, and selecting the user you've just created. Find the **Multi-Factor Authentication** section and click on the **Send en emrollment invitation**
+2. Create an **Application**: Applications → Create Application → Regular Web Application. Name
    it `AgentCoreLabWebApp`.
-   - **Callback URLs**: `http://127.0.0.1:5000/auth/callback,
-     http://127.0.0.1:5000/connect-account/callback`
-     > Note: the actual routes in `app.py` are `/auth/callback` and
-     > `/connect-account/callback` (with a slash before "callback", not a hyphen) —
-     > use those exact paths, they must match what the app redirects to/from exactly.
+   - **Callback URLs**: `http://127.0.0.1:5000/auth/callback`,`http://127.0.0.1:5000/connect-account/callback`
    - **Allowed Logout URLs**: `http://127.0.0.1:5000/logout`
    - **Allowed Web Origins**: `http://127.0.0.1`
    - Copy **Domain**, **Client ID**, **Client Secret** from this application's Settings
      tab → put into **both** `.env` files:
-     - Web App .env: `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`
-     - AgentCore Deployment .env: `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`
-       (this app is reused for CIBA — see Section 4)
+     - **Web App .env**: `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`
+     - **AgentCore Deployment .env**: `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`
    - Scroll down to this same application's **Advanced Settings** → **Grant Types**
-     tab → check **Token Vault** and **CIBA** (Client Initiated Backchannel
-     Authentication).
-2. **Custom API for `AUTH0_AUDIENCE`**: Applications → APIs → Create API. Name it
-   `SESummitAPI`, identifier (the `aud` claim) exactly `https://agentcore-lab-api` —
-   this matches the default already in `chatWebApp/env.template` and `agentCoreDeployment/env.sample`. 
-   Go down to Access Settings and enable "Allow Offline Access". No scopes required. 
-3. **Enterprise connection to Okta**: Authentication → Enterprise → add an OIDC
+     tab → check **Token Vault**, **Refresh Token**, **Client Initiated Backchannel Authentication (CIBA)**.
+   - Just above Advanced Settings, in the **Client-Initiated Backchannel Authentication (CIBA)** section, there will be a **Notification Channels**, enable **Guardian Push**
+3. Create a **Custom API**: Applications → APIs → Create API.:
+    - Name: `SESummitAPI`
+    - Identifier (the `aud` claim): `https://agentcore-lab-api` - This matches the default already in `chatWebApp/env.template` and `agentCoreDeployment/env.sample`.  This is the API that is specified in the `AUTH0_AUDIENCE` .env variable in both the **Web App .env** and **AgentCore Deployment .env**, verify those are both set to `https://agentcore-lab-api` within those files.
+    - Press **Create**
+    - Go to the **Settings** tab, scroll down to Access Settings and enable `Allow Offline Access`, press **Save**
+4. Create an **Enterprise connection** to your Okta org: Authentication → Enterprise → OpenID Connect → **Create** button
    connection. Create it as an OIDC-based Enterprise Connection within your Auth0
    tenant, named exactly `okta-agentcore`.
-   - Discovery URL: `https://{your-okta-domain}/.well-known/openid-configuration`.
-   - Client ID/Secret: from the Okta OIDC app created in 5.2.
-   - Request `offline_access` (Token Vault needs a refresh token to redeem later).
-   - Ensure "Display connection as a button" is checked
-   - Set this connection's own default **Scope** field to include `okta.users.read`.
-     This is a normal Dashboard field on the connection's own configuration screen (not
-     a Management API/CLI-only setting) — set it here, at connection creation/edit time.
-     `CONNECTED_ACCOUNT_SCOPE` in the Web App .env also defaults to including
-     `okta.users.read` — both settings are required together, or you'll hit either
-     `Custom scopes are not allowed for this request` or a later `insufficient_scope`
-     error (see Section 4, "Getting `okta.users.read` onto the federated token").
-   - The connection name (`okta-agentcore`) becomes `AUTH0_CONNECTION_NAME` in the
-     Web App .env, matching the default already there.
-   - Under this connection → **Purpose** tab → enable it for **both** "Authentication"
-     and "Connected Accounts for Token Vault" — both toggles need to be on, not just
-     the Token Vault one.
-   - Still under this connection → **Applications** tab → confirm `AgentCoreLabWebApp`
-     from step 1 is enabled.
-   - Back in Okta: add `https://{AUTH0_DOMAIN}/login/callback` to the Okta app's
-     Sign-in redirect URIs.
-4. **MyAccount API**: Auth0 Dashboard → activate the My Account API, authorize
-   `AgentCoreLabWebApp`, That will create a new API called "Auth0 My Account API", navigate to the API detail page, on the "settings" tab, turn off "Require 2FA". Then on the "Application Access" tab, grant all User-delegated Access permissions for the `AgentCoreLabWebApp` app.
-5. **MRRT (Multi-Resource Refresh Token) policy**: go to the `AgentCoreLabWebApp`
-   application page, scroll down to **Multi-Resource Refresh Token**, and click **Edit
-   Configuration**. Enable it for **both** the Auth0 My Account API and `SESummitAPI`
-   (the custom API from step 2). This is what lets a single refresh token obtained at
+   - **Purpose** `Authentication and Connected Accounts for Token Vault`
+   - **General** Connection Name: `okta-agentcore`
+   - **OpenID Connect Discovery URL** `https://{your-okta-domain}/.well-known/openid-configuration`.
+   - **Client ID** from the Okta OIDC app created in 5.2.
+   - **Communication Channel** Back Channel
+   - **Authentication Method** Client Secret from the Okta OIDC app created in 5.2.
+   - Copy the **Callback URL** and **Logout URL** and enter them in the **Sign-in** and **Sign-out** redirect URI fields within the Okta Integrated App you created in step 5.2.4
+   - Press **Create**
+   - Back on API detail page, select the **Settings** tab and in **General** -> **Scopes** add `offline_access okta.users.read okta.groups.read` (Token Vault needs a refresh token to redeem later).
+   - On the **Login Experience** tab, ensure `Display connection as a button` is checked and press **Save**
+   - On the **Applications** tab → confirm `AgentCoreLabWebApp` is enabled.   
+
+5. Enable and setup the **MyAccount API**: Auth0 Dashboard → **Applications** → **APIs**, click the **Activate** button in the **My Account API** notification box at the top of the screen (if it is not there, then you may have already activated it)
+  - That will create a new API called **Auth0 My Account API**, click on the API name to navigate to the API detail page:
+  - On the **Settings** tab, turn off `Require 2FA`
+  - On the **Settings** tab, in the **Access Settings** section turn on **Allow Skipping User Consent**
+  - On the **Applications** tab, grant all User-delegated Access permissions for the `AgentCoreLabWebApp` app. 
+
+6. Configure **MRRT (Multi-Resource Refresh Token) policy**: Back in **Applications**, go to the `AgentCoreLabWebApp`
+   application page, scroll down to **Multi-Resource Refresh Token**, and click **Edit Configuration**. Enable it for **both** the `Auth0 My Account API` and `SESummitAPI`.
+   This is what lets a single refresh token obtained at
    login be exchanged for both audiences later — without it, exchanging for the
    MyAccount API audience silently falls back to the original login audience instead of
-   erroring (see Section 6 for how to verify this in Auth0 Logs if something's off).
-6. **Create a matching Auth0 user**: Auth0 Dashboard → User Management → Users →
+   erroring.
+7. **Create a matching Auth0 user**: Auth0 Dashboard → User Management → Users →
    Create User, using the **same email address** as the Okta user you created in 5.2.1.
-   The FGA tuple (5.4.3), the Okta group membership (5.2.1), and this Auth0 user all
+   The FGA tuple (created in step 5.4.3), the Okta group membership (created in step 5.2.1), and this Auth0 user all
    need to share that one email address for the demo to work end to end.
 
 ### 5.4 Auth0 FGA store setup
 
-1. Create a store at `dashboard.fga.dev`.
-2. Model editor — paste exactly:
+1. Using your okta email address, login to `dashboard.fga.dev`. I this is your first time logging in or you have existing models you'd like to save, select **+ Add new store** and name it `SESummitAILab`, click **Finish**. Click on **Model Explorer**
+2. On the Model Explorer page, within the Model box, paste exactly:
    ```
    model
      schema 1.1
@@ -385,34 +385,34 @@ a value needed in either one of these files, the doc tells you which file it goe
      relations
        define read_okta: [user, group#member]
    ```
-3. **Create the authorization tuple.** This step is required, not optional — the model
-   schema alone grants nothing. Without a tuple, every `check()` call returns
-   `allowed: false` and `getOktaGroups` will always be denied, regardless of the model
-   being correct. In the store's **Tuple Management** screen, add a tuple:
+   and press **Save**
+3. From the left menu, select **Tuple Management** and create the authorization tuple by clicking on the **+ Add Tuple** button.
    - User: `user:<your-test-user's-email>`
+   - Object: `okta` Enter ID: `groups`
    - Relation: `read_okta`
-   - Object: `okta:groups`
+   > **This must be the same email address** as the Okta user and the Auth0
+   > user — all three need to line up on one email for the demo to work.
 
-   > **This must be the same email address** as the Okta user (5.2.1) and the Auth0
-   > user (5.3.6) — all three need to line up on one email for the demo to work.
-4. **Authorized Clients**: go to **Store Settings** → **Authorized Clients** →
-   **+ Create Client**. Name it `SESummitAgent`. Under **Client Authorization**, check
-   the permission boxes for **Read/Write model, changes, and assertions**, **Write and delete tuples**, and **Read and query**.
-   Save the resulting Client ID/Secret → **AgentCore Deployment .env**:
-   `FGA_CLIENT_ID`, `FGA_CLIENT_SECRET`. Also on the FGA Client detail page copy the API Token Issuer and API Audience values → **AgentCore Deployment .env**:`FGA_API_TOKEN_ISSUER`,`FGA_API_AUDIENCE`
-5. Go to **Store Settings** and copy: **API URL**, **Store ID**, **Model ID** → all into **AgentCore Deployment .env** as
-   `FGA_API_URL`, `FGA_STORE_ID`, `FGA_MODEL_ID` respectively (matching names, direct paste).
-   FGA config is only used by the agent, not the web app — none of these go into the Web App .env.
+4. In the left hand menu, go to **Store Settings** scroll to the **Authorized Clients** section towards the bottom of the page.
+- Click the **+ Create Client** button
+- **Client Name** `SESummitAgent`
+- Under **Client Permissions** check:
+    - **Read/Write model, changes, and assertions**
+    - **Write and delete tuples**
+    - **Read and query**.
+- Click **Create**
+- Save the resulting Store ID, Client ID and Client Secret in **AgentCore Deployment .env** in the files `FGA_STORE_ID`, `FGA_CLIENT_ID` and `FGA_CLIENT_SECRET` respecitvely. Click **Continue**
+- Select the **CURL** tab from the modal window and copy the top variables `FGA_API_URL` `FGA_STORE_ID` `FGA_MODEL_ID` `FGA_API_TOKEN_ISSUER` `FGA_API_AUDIENCE` `FGA_CLIENT_ID` `FGA_CLIENT_SECRET` and paste over the same variables in the **AgentCore Deployment .env** file.
 
 ### 5.5 AWS setup
 
 This lab uses Okta-provided AWS sandbox accounts that only support SSO-based access —
 there are no long-lived IAM access keys anywhere in this lab. Every AWS-touching step
-here — the local deploy script, and the web app's own DynamoDB access — authenticates
+here, the local deploy script, and the web app's own DynamoDB access, authenticates
 via an AWS SSO profile rather than static credentials.
 
-1. **Run `aws configure sso`** — one-time setup. This prompts for your SSO start URL and SSO 
-   region which you can get by going to your Okta Dashboard (https://okta.okta.com), search for AWS and select "AWS Corp: Business Technology". Expand the AWS account named similar to "okta-bt-gtm-<your okta username>" and click on the "Access keys" link. From there you can copy and paste the "SSO Start URL", "SSO Region". It will prompt you for:
+1. In your local terminal **Run `aws configure sso`** — one-time setup. This prompts for your SSO start URL and SSO 
+   region which you can get by going to your Okta Dashboard (https://okta.okta.com), search for AWS and select "AWS Corp: Business Technology". Expand the AWS account named similar to "okta-bt-gtm-<your okta username>" and click on the "Access keys" link. From there you can copy and paste the **SSO Start URL**, **SSO Region**. It will prompt you for:
 
    - **SSO Session name**: `APJSESummit`
    - **SSO start URL**: cut and paste from AWS access portal
@@ -423,167 +423,41 @@ via an AWS SSO profile rather than static credentials.
    - **Default client Region**: accept default
    - **CLI default output format**: accept default
    - **Profile name**: accept default
-   - It will show you your profile name which should be similar to `GTMUser-<bunch of numbers>`, copy that profile names into the variable called `AWS_PROFILE` in **both** the Web App .env and the AgentCore Deployment .env — it must be the same profile name in each.
-2. **Run `./deployInfra`** (repo root, alongside `deployAgentCore`/`runLocalApp`) — this
-   is automated via CloudFormation rather than a console click-through. It creates
-   three things in one run: the DynamoDB session table (this step), the agent's
-   execution role with its DynamoDB policy already attached (replaces the manual step
-   formerly in 5.8), and the mock Lambda + AgentCore Gateway + GatewayTarget (replaces
-   the manual console build formerly in 5.10).
-   - It'll prompt you for your SSO profile name (from 5.5.1) and the `AUTH0_DOMAIN`/
-     `AUTH0_CLIENT_ID` values from the Auth0 application you created in 5.3.1 — there's
-     nothing to copy these from yet at this point in the walkthrough, since
-     `agentCoreDeployment/.env` isn't populated until 5.6. If you've already exported
-     `AWS_PROFILE`/`AUTH0_DOMAIN`/`AUTH0_CLIENT_ID` in your shell, it uses those instead
-     of prompting.
-   - It deploys to whatever region `AWS_DEFAULT_REGION` (if exported) or your SSO
-     profile's own configured region resolves to — it does not assume any particular
-     region.
-   - See `infrastructure/templates/` for what each of the three CloudFormation stacks
-     actually creates, and the templates' own comments for how the execution role's
-     policy mirrors what `Runtime.configure(auto_create_execution_role=True)` would
-     otherwise auto-generate.
-   - At the end it prints `SESSION_TABLE_NAME`, `AGENT_EXECUTION_ROLE_ARN`, and
-     `MCP_GATEWAY_URL` — copy these into your `.env` files in Section 5.6 (and 5.7 for
-     `SESSION_TABLE_NAME`). It does not edit either `.env` file for you.
+   - It will show you your profile name which should be similar to `GTMUser-<bunch of numbers>`, copy that profile name into the variable called `AWS_PROFILE` in **both** the **Web App .env** and the **AgentCore Deployment .env**.
 
-### 5.6 Populate the AgentCore Deployment .env
+2. In your local terminal **Run `./deployInfra`** — this
+   is and automated via CloudFormation and creates
+   three things in one run: the DynamoDB session table, the agent's
+   execution role with its DynamoDB policy already attached and the mock Lambda + AgentCore Gateway + GatewayTarget.
+   - This script will prompt you for your `AWS_PROFILE`, `AUTH0_DOMAIN` and
+     `AUTH0_CLIENT_ID`
 
-Copy `agentCoreDeployment/env.sample` → `agentCoreDeployment/.env`. Its defaults are already the
-correct values for this lab — only the tenant/account-specific fields below need
-filling in; leave everything else as shipped:
+   - At the end it prints `AGENT_EXECUTION_ROLE_ARN`, and
+     `MCP_GATEWAY_URL` copy these into your **AgentCore Deployment .env** replacing the existing variables.
 
-| Var | Source |
-|---|---|
-| `AWS_PROFILE` | your `aws configure sso` profile name from 5.5.1 |
-| `AWS_DEFAULT_REGION` | leave `us-west-2` unless deploying elsewhere |
-| `AUTH0_DOMAIN` | your Auth0 tenant domain (bare, no scheme) |
-| `AUTH0_CLIENT_ID` / `AUTH0_CLIENT_SECRET` | the `AgentCoreLabWebApp` app from 5.3.1 (also reused for CIBA) |
-| `AUTH0_AUDIENCE` | leave `https://agentcore-lab-api` — must exactly match the Web App .env value and the API identifier from 5.3.2 |
-| `SESSION_TABLE_NAME` | leave `agentcore-lab-sessions` — must exactly match the Web App .env value |
-| `CIBA_SCOPE` / `CIBA_BINDING_MESSAGE` | leave the defaults, or customize the binding message shown on the user's push-approval device |
-| `FGA_API_URL`, `FGA_STORE_ID`, `FGA_MODEL_ID`, `FGA_API_TOKEN_ISSUER`, `FGA_API_AUDIENCE`, `FGA_CLIENT_ID`, `FGA_CLIENT_SECRET` | your FGA store's config output, 5.4.4/5.4.5 |
-| `FGA_API_SCHEME` | leave `https` |
-| `AGENT_EXECUTION_ROLE_ARN` | `ExecutionRoleArn` output from `./infrastructure/deployInfra`, 5.5.2 |
-| `MCP_GATEWAY_URL` | `GatewayUrl` output from `./infrastructure/deployInfra`, 5.5.2 |
-| `OKTA_DOMAIN` | bare Okta org domain from 5.2.5 — **not** the `-admin` host |
-| `BEDROCK_MODEL_ID` | `global.anthropic.claude-sonnet-5` by default — confirm it's still live before deploying (Section 6) |
-
-### 5.7 Populate the Web App .env
-
-Copy `chatWebApp/env.template` → `chatWebApp/.env`. As with the AgentCore Deployment .env, the defaults are
-already correct for this lab:
-
-| Var | Source |
-|---|---|
-| `APP_SECRET_KEY` | generate your own: `python3 -c "import secrets; print(secrets.token_hex(32))"` |
-| `AUTH0_CLIENT_ID` / `AUTH0_CLIENT_SECRET` / `AUTH0_DOMAIN` | same Auth0 app as 5.3.1 |
-| `AUTH0_AUDIENCE` | leave `https://agentcore-lab-api` — same value as the AgentCore Deployment .env |
-| `AUTH0_SCOPE` | leave the default — must include `create:me:connected_accounts`, already the case in `chatWebApp/env.template` |
-| `CONNECTED_ACCOUNT_SCOPE` | leave the default (`openid profile email offline_access okta.users.read`) — only works once the connection's own default scope also includes `okta.users.read` (5.3.3) |
-| `AUTH0_CONNECTION_NAME` | leave `okta-agentcore` — matches the connection Name you set in 5.3.3 |
-| `AWS_PROFILE` | same SSO profile name as the AgentCore Deployment .env (5.5.1) |
-| `AWS_REGION` | leave `us-west-2` — same region as your DynamoDB table / deploy region |
-| `AGENT_RUNTIME_ARN` | filled in after deploy (5.8) |
-| `SESSION_TABLE_NAME` | leave `agentcore-lab-sessions` — same value as the AgentCore Deployment .env |
-
-There are no `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN` vars here —
-the web app's DynamoDB access goes through the same `AWS_PROFILE` SSO session described
-in 5.5, not static credentials.
-
-### 5.8 Deploy the agent
+### 5.6 Deploy the agent
+In your local terminal run:
 
 ```bash
 ./deployAgentCore
 ```
 
 This checks the AWS SSO session for `AWS_PROFILE` (5.5.1), creates `agentCoreDeployment/.venv` on first run, installs
-`agentCoreDeployment/requirements.txt`, and runs `agentcore_deployment.py`, which:
+`agentCoreDeployment/requirements.txt`, and runs `agentcore_deployment.py`, which will prints `AGENT_RUNTIME_ARN: <arn>` when it finshes successfully.
 
-- authenticates via `AWS_PROFILE` (SSO)
-- calls `Runtime.configure(...)` with a `customJWTAuthorizer` using `discoveryUrl`
-  (derived from `AUTH0_DOMAIN`) and `allowedAudience` (from `AUTH0_AUDIENCE`) — no
-  `allowedClients`
-- calls `Runtime.launch(env_vars=RUNTIME_ENV_VARS)`, pushing ~17 vars into the deployed
-  container's environment
-- prints `AGENT_RUNTIME_ARN: <arn>` on success — copy this into `chatWebApp/.env`'s
-  `AGENT_RUNTIME_ARN`
-
-**The execution role and its DynamoDB policy are already handled** — `execution_role`
-in `agentcore_deployment.py` points at the role created by
-`infrastructure/templates/02-agent-execution-role.yaml` (via `./infrastructure/deployInfra`
-in 5.5.2), which already has the DynamoDB `GetItem`/`PutItem` grant attached. Nothing to
-do by hand here; this used to require finding an auto-created role
-(`AmazonBedrockAgentCoreSDKRuntime-<region>-<hash>`) in the IAM console and attaching a
-policy to it manually after first deploy — that's no longer necessary.
+**Copy this** into `chatWebApp/.env`'s `AGENT_RUNTIME_ARN`
 
 ### 5.9 Run the web app
 
+Start the web app in a terminal window by running:
 ```bash
 ./runLocalApp
 ```
 
-Starts the web app.
+Open your web browser and navigate to (http://127.0.0.1:5000).
+You can stop your web app within the termain by pressing `ctrl + c`
 
-### 5.10 AgentCore Gateway setup (mock MCP tool)
-
-This step wires up a second, remote tool for the agent via **Amazon Bedrock AgentCore
-Gateway** — a deliberately mocked stand-in for a real backend tool ("list my assigned
-tasks"). It's part of what this lab demonstrates (an agent unifying directly-coded
-tools with dynamically-discovered remote tools behind one interface) and should be
-completed, not skipped.
-
-**This is already built** — `infrastructure/templates/03-gateway.yaml` (deployed via
-`./infrastructure/deployInfra` back in 5.5.2) creates the mock Lambda, the Gateway, and
-the GatewayTarget together. This used to be built by hand in the AWS console; it isn't
-anymore. If you haven't already, copy that run's `GatewayUrl` output into
-`MCP_GATEWAY_URL` in the **AgentCore Deployment .env** and re-deploy
-(`./deployAgentCore`) so it reaches the running container's environment.
-
-**Architecture note**: this is a Lambda-ARN Gateway target, not a real MCP server or an
-OpenAPI target. Gateway wraps a plain Lambda function using a "Target Schema" so the
-agent can discover/call it as if it were an MCP tool. This matters because Lambda-ARN
-targets only support the Gateway's own IAM/SigV4 service role when invoking the
-function — they do **not** support Gateway-native OAuth token exchange / per-user
-delegation the way genuine MCP-server or OpenAPI target types do. The bearer token the
-agent sends is used for the Gateway's *inbound* auth, not for anything downstream of the
-Lambda.
-
-What the template creates, for reference:
-- The mock Lambda (Python), with the exact handler this lab used to have you paste into
-  the console by hand — returns a single hardcoded task.
-- The Gateway's **Target Schema** — the MCP tool definition exposed to the agent:
-  ```json
-  [
-    {
-      "name": "get_tasks",
-      "description": "Returns a set of tasks for IT Admin.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": []
-      }
-    }
-  ]
-  ```
-- **Inbound Auth Configuration**: Discovery URL =
-  `https://{AUTH0_DOMAIN}/.well-known/openid-configuration`, plus a Custom Claim: Name
-  `azp`, Type `String`, Value = the Auth0 application's Client ID (from 5.3.1). This
-  parallels, but is configured separately from, the Runtime's own `customJWTAuthorizer`
-  (5.8).
-- The Gateway's own service role (the identity the Gateway assumes to invoke the
-  Lambda — unrelated to the per-user Auth0 token).
-
-No code changes are needed on the agent side:
-`agentCoreDeployment/agentcore_agent.py`'s `create_transport()` already connects via
-`streamablehttp_client(MCP_GATEWAY_URL, headers={"Authorization": f"Bearer
-{access_token}"})`, sending the same Auth0 access token used elsewhere as the bearer
-credential; `strands_agent_bedrock`'s `MCPClient(create_transport)` context manager calls
-`list_tools_sync()` to pull in `get_tasks` as a remote tool alongside the local ones.
-
-Test this in 5.11.
-
-### 5.11 Test the flow
+### 5.10 Test the flow
 
 1. Open `http://127.0.0.1:5000`, click login. Complete Auth0 login (expect MFA/consent
    per your tenant policy).
@@ -592,17 +466,10 @@ Test this in 5.11.
    status shown.
 3. Ask: *"what Okta groups am I part of?"* — expect the FGA check to pass (confirm via
    agent logs: `FGA response: ... 'allowed': True`), then a real group list back from
-   Okta. This should work end-to-end; if you get a 403 `insufficient_scope` instead, see
-   "Getting `okta.users.read` onto the federated token" in Section 4 — you're missing
-   one of the two required scope settings, and need to re-run Connect Account after
-   fixing it.
+   Okta. 
 4. Ask for a password reset (e.g. *"reset my password"*) to exercise the CIBA path —
    expect a push-approval prompt on the user's registered device; approving it should
    return a success message from the agent.
-5. Ask something like *"what are my assigned tasks?"* to exercise the Gateway/MCP path
-   from 5.10 — the system prompt in `agentcore_agent.py` routes "employee
-   tasks"/"assigned work"/"employee records" queries to whatever dynamic remote tools
-   are available, which should pick up `get_tasks` and return the mock task data.
 
 If anything above doesn't work as described, see Section 6, Troubleshooting.
 
@@ -651,8 +518,73 @@ If you get a **401** invoking the agent, check, in order:
    `azp`, not `client_id` — `allowedClients` can never match).
 2. `runtimeSessionId` is ≥ 33 characters (this repo's own `session_id` UUID4 already
    satisfies this — only relevant if you've changed that code).
-3. The DynamoDB IAM policy (5.8) is attached to the auto-created execution role.
+3. The DynamoDB IAM policy is attached to the execution role named in
+   `AGENT_EXECUTION_ROLE_ARN` (created by `./deployInfra`, 5.5.2/5.8) — check
+   `infrastructure/templates/02-agent-execution-role.yaml` deployed cleanly.
 
 If you get a **500** from inside the container, check CloudWatch under
 `/aws/bedrock-agentcore/runtimes/<agent_id>-<endpoint_name>` — the `[runtime-logs]`
 stream shows the actual Python traceback.
+
+### Python version mismatches in `deployAgentCore`/`runLocalApp`
+
+Both scripts resolve a `BASE_PYTHON` (preferring Homebrew's `python3.12`, falling back
+through `3.11`/`3.10`/system `python3`) and only create `.venv` from it if `.venv`
+doesn't already exist yet. If you previously ran either script, then later
+installed/upgraded your Python (e.g. via Homebrew), the script won't notice — it reuses
+the existing `.venv`, still built from the *old* interpreter, silently. Symptoms look
+like version-related import errors or unexpected package behavior that don't match
+what you'd expect from your currently-installed Python.
+
+Fix: delete the stale venv and let the script rebuild it from the current
+`BASE_PYTHON` on the next run —
+```bash
+rm -rf agentCoreDeployment/.venv   # for deployAgentCore
+rm -rf chatWebApp/.venv            # for runLocalApp
+```
+No code change needed; this is a one-time cleanup, not a recurring step.
+
+
+
+## 7. Environment Variable Reference
+
+### AgentCore Deployment .env
+
+Copy `agentCoreDeployment/env.template` → `agentCoreDeployment/.env`. Its defaults are already the correct values for this lab — only the tenant/account-specific fields below need
+filling in; leave everything else as shipped:
+
+| Var | Source |
+|---|---|
+| `AWS_PROFILE` | your `aws configure sso` profile name from 5.5.1 |
+| `AWS_DEFAULT_REGION` | leave `us-west-2` unless deploying elsewhere |
+| `AUTH0_DOMAIN` | your Auth0 tenant domain (bare, no scheme) |
+| `AUTH0_CLIENT_ID` / `AUTH0_CLIENT_SECRET` | the `AgentCoreLabWebApp` app from 5.3.1 (also reused for CIBA) |
+| `AUTH0_AUDIENCE` | leave `https://agentcore-lab-api` — must exactly match the Web App .env value and the API identifier from 5.3.2 |
+| `SESSION_TABLE_NAME` | leave `agentcore-lab-sessions` — must exactly match the Web App .env value |
+| `CIBA_SCOPE` / `CIBA_BINDING_MESSAGE` | leave the defaults, or customize the binding message shown on the user's push-approval device |
+| `FGA_API_URL`, `FGA_STORE_ID`, `FGA_MODEL_ID`, `FGA_API_TOKEN_ISSUER`, `FGA_API_AUDIENCE`, `FGA_CLIENT_ID`, `FGA_CLIENT_SECRET` | your FGA store's config output, 5.4.4/5.4.5 |
+| `FGA_API_SCHEME` | leave `https` |
+| `AGENT_EXECUTION_ROLE_ARN` | `ExecutionRoleArn` output from `./infrastructure/deployInfra`, 5.5.2 |
+| `MCP_GATEWAY_URL` | `GatewayUrl` output from `./infrastructure/deployInfra`, 5.5.2 |
+| `OKTA_DOMAIN` | bare Okta org domain from 5.2.5 — **not** the `-admin` host |
+| `BEDROCK_MODEL_ID` | `global.anthropic.claude-sonnet-5` by default — confirm it's still live before deploying (Section 6) |
+
+### Web App .env
+
+Copy `chatWebApp/env.template` → `chatWebApp/.env`. As with the AgentCore Deployment .env, the defaults are already correct for this lab:
+
+| Var | Source |
+|---|---|
+| `APP_SECRET_KEY` | generate your own: `python3 -c "import secrets; print(secrets.token_hex(32))"` |
+| `AUTH0_CLIENT_ID` / `AUTH0_CLIENT_SECRET` / `AUTH0_DOMAIN` | same Auth0 app as 5.3.1 |
+| `AUTH0_AUDIENCE` | leave `https://agentcore-lab-api` — same value as the AgentCore Deployment .env |
+| `AUTH0_SCOPE` | leave the default — must include `create:me:connected_accounts`, already the case in `chatWebApp/env.template` |
+| `CONNECTED_ACCOUNT_SCOPE` | leave the default (`openid profile email offline_access okta.users.read`) — only works once the connection's own default scope also includes `okta.users.read` (5.3.3) |
+| `AUTH0_CONNECTION_NAME` | leave `okta-agentcore` — matches the connection Name you set in 5.3.3 |
+| `AWS_PROFILE` | same SSO profile name as the AgentCore Deployment .env (5.5.1) |
+| `AWS_REGION` | leave `us-west-2` — same region as your DynamoDB table / deploy region |
+| `AGENT_RUNTIME_ARN` | filled in after deploy (5.8) |
+| `SESSION_TABLE_NAME` | leave `agentcore-lab-sessions` — same value as the AgentCore Deployment .env |
+
+There are no `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN` vars here —
+the web app's DynamoDB access goes through the same `AWS_PROFILE` SSO session not static credentials.

@@ -138,11 +138,11 @@ sequenceDiagram
   - インストール: Xcode Command Line Tools（`xcode-select --install`）に付属、または Homebrew 経由で `brew install git`。
   - アップグレード: `brew upgrade git`（Homebrew でインストールした場合）。
 
-- **Python 3.10+**
-  - 確認: `python3 --version` および `which python3` — macOS には古い Command Line Tools 版の `python3` しか付属しておらず、これは今回の用途には十分な本物の 3.10+ インタープリタでは **ありません**。`PATH` 上に別途、実体のある Python（通常は Homebrew 経由）が必要です。
-  - インストール: `brew install python@3.12`（または `python@3.11` / `python@3.10`）。
-  - アップグレード: `brew upgrade python@3.12`（インストールした formula に応じて読み替え）。
-  - 補足: このリポジトリ自身のヘルパースクリプト（`deployAgentCore`、`runLocalApp`）は、システムの python3 よりも Homebrew の python3.12/3.11/3.10 を自動検出して優先的に使用し、それを使って独自の `.venv` を構築します。そのため、スクリプトが探す場所のどこかに本物の 3.10+ インタープリタが1つでも存在していれば、自分で手動選択・有効化する必要はなく、存在していさえすれば十分です。
+- **Python 3**
+  - ターミナルウィンドウで:
+    - `brew install python@3.12`
+    - `echo 'export PATH="/opt/homebrew/opt/python@3.12/bin:$PATH"' >> ~/.zshrc`
+    - `source ~/.zshrc`
 
 - **AWS CLI v2**
   - 確認: `aws --version` — `1.x` ではなく `aws-cli/2.x` と表示されることを確認してください。この Lab のスクリプトや手順は `aws configure sso`、`aws sso login`、`aws sts get-caller-identity`、`aws bedrock list-inference-profiles` を使用し、いずれも v2 が必要です。
@@ -156,17 +156,13 @@ sequenceDiagram
   - アップグレード: `brew upgrade auth0-cli`。
   - 認証（Section 5 の Management API を使う手順、例えば `auth0 apps update` による MRRT ポリシー更新の前に必要）: `auth0 login` を実行すると、ブラウザ上でテナントに対するデバイスコードフローが案内されます。
 
-コンテナエンジン（Docker/Finch/Podman）は、この Lab のデフォルトのデプロイパスでは **必要ありません** — `./deployAgentCore` はローカルでのコンテナビルドではなく、AWS CodeBuild 経由でビルド・デプロイを行います。コンテナエンジンが必要になるのは、任意の代替デプロイモードである `runtime.launch(local=True)` を使う場合のみで、本ガイドではこのモードは使用しません。
-
-Bedrock モデルへのアクセスと、現時点で利用可能な Claude のモデル ID も必要ですが、これはアカウント/リージョンごとの設定の問題であり、CLI/SDK ツールのインストールの話ではありません — Section 4 の「Bedrock モデルの可用性」を参照してください。
-
 ## 4. 注意すべきポイント
 
 このセクションでは、以下の*手動*セットアップ手順における、見落としがちな細かい点について説明します — ダッシュボードでのクリック操作、Management API 呼び出し、そして自分で正しく設定する必要がある環境変数の値などです。
 
 ### Okta の設定
 
-- **`OKTA_DOMAIN` は素の org ベースドメイン**（`<org>.okta.com`）でなければならず、`-admin` コンソールのホスト名（`<org>-admin.okta.com`）を使ってはいけません。`-admin` ホストに対して `/api/v1/...` を呼び出すと、**空のボディを伴う 403** が返ってきます — これは権限の問題に見えますが、実際には Okta のエッジが未対応のホスト名/パスの組み合わせをブロックしているだけです（本物の Okta API の 403 には `{"errorCode":"E0000006",...}` のような JSON ボディが付きます — 403 でボディが空、というのがその見分け方です）。スキームのプレフィックスも付けないでください。コード側で `https://`/`http://` を自動的に取り除きます。
+- **`OKTA_DOMAIN` は素の org ベースドメイン**（`<org>.okta.com`）でなければならず、`-admin` コンソールのホスト名（`<org>-admin.okta.com`）を使ってはいけません。`-admin` ホストに対して `/api/v1/...` を呼び出すと、**空のボディを伴う 403** が返ってきます — これは権限の問題に見えますが、実際には Okta のエッジが未対応のホスト名/パスの組み合わせをブロックしているだけです。
 
 ### federated token に `okta.users.read` を付与する（2つの設定、両方必須）
 
@@ -190,8 +186,6 @@ error_description="The access token provided does not contain the required scope
 
 ここから始める前に、上記の Section 3 に記載されている必要なツールと環境がすべてセットアップ済みであることを確認してください。
 
-本セクション全体を通して、**「Web App .env」** は FastAPI の Web アプリ用の env ファイル（現在は `chatWebApp/.env`、`chatWebApp/env.template` からコピー）を指し、**「AgentCore Deployment .env」** はエージェント自体の env ファイル（現在は `agentCoreDeployment/.env`、`agentCoreDeployment/env.sample` からコピー）を指します。手順の中で必要な値が得られるたびに、本ドキュメントはそれを2つのファイルのどちらに、どの変数名で入れるべきかを示します。
-
 ### 5.1 クローンと確認
 
 ```bash
@@ -199,75 +193,83 @@ git clone <this-repo-url> agentcore-auth0-webapp
 cd agentcore-auth0-webapp
 ```
 
-ここには独立した2つのアプリが存在します。FastAPI の Web アプリである `chatWebApp/` と、AgentCore エージェント本体 + ローカル専用のデプロイスクリプトである `agentCoreDeployment/` です。それぞれが独自の `.env` を持っています。
+ここには独立した2つのアプリが存在します。FastAPI の Web アプリである `chatWebApp/` と、AgentCore エージェント本体 + そのデプロイスクリプトである `agentCoreDeployment/` です。さらに、それらのデプロイを自動化するために必要な AWS CloudFormation のアセット一式を含む `infrastructure` フォルダもあります。
+
+1. `chatWebApp/env.template` ファイルをコピーして、`chatWebApp/.env` という新しいファイルを作成します。本セットアップガイドを通じて、**「Web App .env」** とは、今作成したこの .env ファイルを指し、WebApp クライアントで使用されます。
+2. `agentCoreDeployment/env.template` ファイルをコピーして `agentCoreDeployment/.env` を作成します。本セットアップガイドを通じて、**「AgentCore Deployment .env」** とは、この env ファイルを指し、AgentCore エージェント自体が使用します。
+
+以降のすべての手順で、ある手順がこれら2つのファイルのどちらかに必要な値を生成した場合、本ドキュメントはそれをどちらのファイルに、どの変数名で入れるべきかを示します。値が得られたら、すぐにコピー&ペーストしてください。
 
 ### 5.2 Okta org のセットアップ
 
-1. Workforce（starter）org を作成、または既存のものを使用します。
-   - 新しい Okta ユーザーを作成します。このユーザーには、後で作成する **Auth0 ユーザーで再利用するメールアドレス**（Section 5.3 の末尾）を設定してください — デモがエンドツーエンドで動作するには、FGA タプル、Okta のグループメンバーシップ、Auth0 のアイデンティティがすべて同じメールアドレスで揃っている必要があります。
-   - 2つのグループを作成します。**Okta Group 1** と **Okta Group 2** です。
-   - 先ほど作成したユーザーを **Okta Group 2 のみ**に割り当てます — Okta Group 1 には入れないでください。これが後で `getOktaGroups` が返す内容であり、FGA によってアクセスできることを示すグループと、できないことを示すグループの両方を用意できます。
-2. Okta Admin Console → Applications → Create App Integration → **OIDC – Web Application**、grant type は **Authorization Code**。名前は `SESummitLabApp` とします。
-3. このアプリで **Refresh Token** grant type を有効化します。これは 5.3.3 で Auth0 connection 上で `offline_access` スコープをリクエストすることとは別であり、両方が追加で必要です（Section 4 参照）。
-4. redirect URI は今のところ空のままにしておきます。Auth0 domain が分かった時点（5.3.1）で `https://{AUTH0_DOMAIN}/login/callback` を追加します。
-5. このアプリの Client ID/Secret と、org の素のベースドメイン — `<org>.okta.com`（`-admin` が付いていれば取り除いたもの）をメモしておきます。
-   - Client ID/Secret は、5.3.3 で作成する Auth0 の enterprise connection にそのまま貼り付けます — どちらの `.env` ファイルにも入れません。
-   - 素のドメインは **AgentCore Deployment .env** の `OKTA_DOMAIN` に入れます。
+1. Workforce（starter）org を作成、または既存のものを使用し、Okta の Admin Console に移動します。
+   - Admin Console --> Directory --> Groups で、2つのグループを作成します: **Okta Group 1** と **Okta Group 2**。
+   - Admin Console --> Directory --> People で、**Add person** ボタンをクリックして新しい Okta ユーザーを作成します。このユーザーには、後で作成する **Auth0 ユーザーで再利用するメールアドレス**（Section 5.3 の末尾）を設定してください — デモがエンドツーエンドで動作するには、FGA タプル、Okta のグループメンバーシップ、Auth0 のアイデンティティがすべて同じメールアドレスで揃っている必要があります。**Activate now** を選択し、覚えておけるパスワードを設定して、**User must change password on first login** のチェックを外します。**Save** ボタンを押します。
+   - 新しい Person が People 画面に表示されない場合は、ページを再読み込みしてから、今作成したユーザーの名前をクリックします。**Admin roles** タブを選択し、**Add individual admin privileges** ボタンをクリックして、**Role** のドロップダウンで **Super Administrator** ロールを検索し、**Save Changes** をクリックします。
+   **-- 注意 --** ユーザーに Super Administrator 権限を与えることはベストプラクティスではありませんが、この Lab のセットアップを迅速に行うためにここでは行っています。
+   - ユーザープロフィールのレコードで **Groups** タブに移動し、今作成したユーザーを **Okta Group 2 のみ**に割り当てます — Okta Group 1 には入れないでください。これが後で `getOktaGroups` が返す内容であり、FGA によってアクセスできることを示すグループと、できないことを示すグループの両方を用意できます。
+2. Okta Admin Console → Applications → Create App Integration → **OIDC – OpenID Connect**、Application Type は **Web Application**、App integration name は **`SESummitLabApp`** とします。
+3. Grant type で、コアグラントの **Authorization Code & Refresh Token** を有効化します。
+
+4. **Sign-in redirect URI** は今のところ空のままにしておきます。これは `https://{AUTH0_DOMAIN}/login/callback` という形になります。同様に **Sign-out redirect URI's** も今のところ空のままにしておき、これは `https://{AUTH0_DOMAIN}/logout` という形になります。Auth0 domain が分かった時点（step 5.3.1）で、これらのフィールドを更新するために戻ってきてください。
+
+5. Assignments で **Allow everyone in your organization to access** を選択し、**Save** ボタンを押します。
+
+6. Client Credentials セクションで **Client ID** をコピーして一時的に保存し、同様に CLIENT SECRETS セクションで **Client Secret** をコピーして一時的に保存します。
+   - Client ID と Client Secret は、5.3.3 で作成する Auth0 の enterprise connection にそのまま貼り付けます — どちらの `.env` ファイルにも入れないので、今のうちにどこか安全な場所に保存しておいてください。
+7. org の素のベースドメイン — `<org>.okta.com` をメモし、URL に `-admin` が含まれていれば取り除きます。例えば、`demo-peach-salmon-30608-admin.okta.com` というドメインは、ベースドメイン `demo-peach-salmon-30608.okta.com` になります。
+   - この素のドメインは **AgentCore Deployment .env** の `OKTA_DOMAIN` に入れます。
+
+8. **`SESummitLabApp`** アプリの **Okta API Scopes** タブで、以下のスコープを付与します:
+  - okta.groups.read
+  - okta.users.read
 
 ### 5.3 Auth0 tenant のセットアップ
 
-1. **Application**: Applications → Create Application → Regular Web Application。名前は `AgentCoreLabWebApp` とします。
-   - **Callback URLs**: `http://127.0.0.1:5000/auth/callback,
-     http://127.0.0.1:5000/connect-account/callback`
-     > 注: `app.py` の実際のルートは `/auth/callback` と
-     > `/connect-account/callback`（"callback" の前はハイフンではなくスラッシュ）です —
-     > これらの正確なパスを使ってください。アプリがリダイレクトする先/元と厳密に一致させる必要があります。
+1. **Auth0 Guardian のセットアップ** Auth0 Dashboard → Security → Multi-factor Auth に移動し、`Push Notification using Auth0 Guardian` が Enabled になっていることを確認します。
+  - Auth0 Dashboard → User Management → Users に移動し、先ほど作成したユーザーを選択して、Guardian への事前登録を行います。**Multi-Factor Authentication** セクションを見つけて **Send en emrollment invitation** をクリックします。
+2. **Application** を作成します: Applications → Create Application → Regular Web Application。名前は `AgentCoreLabWebApp` とします。
+   - **Callback URLs**: `http://127.0.0.1:5000/auth/callback`,`http://127.0.0.1:5000/connect-account/callback`
    - **Allowed Logout URLs**: `http://127.0.0.1:5000/logout`
    - **Allowed Web Origins**: `http://127.0.0.1`
-   - このアプリケーションの Settings タブから **Domain**、**Client ID**、**Client Secret** をコピーし、**両方の** `.env` ファイルに入れます。
-     - Web App .env: `AUTH0_DOMAIN`、`AUTH0_CLIENT_ID`、`AUTH0_CLIENT_SECRET`
-     - AgentCore Deployment .env: `AUTH0_DOMAIN`、`AUTH0_CLIENT_ID`、`AUTH0_CLIENT_SECRET`
-       （このアプリは CIBA でも再利用されます — Section 4 参照）
-   - 同じアプリケーションの **Advanced Settings** → **Grant Types** タブまでスクロールし、**Token Vault** と **CIBA**（Client Initiated Backchannel
-     Authentication）にチェックを入れます。
-2. **`AUTH0_AUDIENCE` 用のカスタム API**: Applications → APIs → Create API。名前は
-   `SESummitAPI`、identifier（`aud` クレーム）は正確に `https://agentcore-lab-api` とします —
-   これは `chatWebApp/env.template` と `agentCoreDeployment/env.sample` に既に入っているデフォルト値と一致するため、そのまま使えば後で編集する必要はありません。スコープは不要です。
-3. **Okta への Enterprise connection**: Authentication → Enterprise → add an OIDC
-   connection。Auth0 tenant 内に OIDC ベースの Enterprise Connection として作成し、名前は正確に `okta-agentcore` とします。
-   - Discovery URL: `https://{your-okta-domain}/.well-known/openid-configuration`。
-   - Client ID/Secret: 5.2 で作成した Okta の OIDC アプリのものを使用します。
-   - `offline_access` をリクエストします（Token Vault は後でリフレッシュトークンを引き換える必要があります）。
-   - この connection 自体のデフォルト **Scope** フィールドに `okta.users.read` を含めるよう設定します。
-     これは connection 自体の設定画面にある通常のダッシュボード項目です（Management API/CLI
-     専用の設定ではありません）— connection の作成/編集時にここで設定してください。
-     Web App .env の `CONNECTED_ACCOUNT_SCOPE` も、デフォルトで `okta.users.read` を含んでいます —
-     両方の設定が揃って初めて有効になり、片方でも欠けていると
-     `Custom scopes are not allowed for this request` または後になって `insufficient_scope`
-     エラーに遭遇します（Section 4「federated token に `okta.users.read` を付与する」を参照）。
-   - connection の名前（`okta-agentcore`）は、Web App .env の `AUTH0_CONNECTION_NAME` になります（すでにそこにあるデフォルト値と一致します）。
-   - この connection の **Purpose** タブで、「Authentication」と「Connected Accounts for Token Vault」の**両方**を有効化します — Token Vault の方だけでなく、両方のトグルをオンにする必要があります。
-   - 同じく connection の **Applications** タブで、ステップ1の `AgentCoreLabWebApp`
-     が有効になっていることを確認します。
-   - Okta 側に戻り、Okta アプリの Sign-in redirect URIs に `https://{AUTH0_DOMAIN}/login/callback` を追加します。
-4. **MyAccount API**: Auth0 Dashboard で My Account API を有効化し、
-   `AgentCoreLabWebApp` を authorize します。これにより「Auth0 My Account API」という新しい
-   API が作成されるので、その API の詳細ページに移動し、**Settings** タブで
-   **Require 2FA** をオフにします。続いて **Application Access** タブで、
-   `AgentCoreLabWebApp` アプリに対する User-delegated Access 権限をすべて許可します。
-5. **MRRT（Multi-Resource Refresh Token）policy**: `AgentCoreLabWebApp` のアプリケーションページに移動し、**Multi-Resource Refresh Token** までスクロールして **Edit
-   Configuration** をクリックします。Auth0 の My Account API と `SESummitAPI`
-   （ステップ2のカスタム API）の**両方**に対して有効化します。これによって、ログイン時に取得した単一のリフレッシュトークンを、後で両方のオーディエンスに対して交換できるようになります —
-   これがないと、MyAccount API オーディエンスへの交換はエラーにならず、黙って元のログインオーディエンスにフォールバックしてしまいます（何かおかしいと感じた場合に Auth0 Logs でこれを確認する方法は Section 6 を参照）。
-6. **対応する Auth0 ユーザーを作成**: Auth0 Dashboard → User Management → Users →
-   Create User で、5.2.1 で作成した Okta ユーザーと**同じメールアドレス**を使って作成します。
-   FGA タプル（5.4.3）、Okta のグループメンバーシップ（5.2.1）、この Auth0 ユーザーが、
-   すべて同じ1つのメールアドレスを共有する必要があります。
+   - このアプリケーションの Settings タブから **Domain**、**Client ID**、**Client Secret** をコピーし、**両方の** `.env` ファイルに入れます:
+     - **Web App .env**: `AUTH0_DOMAIN`、`AUTH0_CLIENT_ID`、`AUTH0_CLIENT_SECRET`
+     - **AgentCore Deployment .env**: `AUTH0_DOMAIN`、`AUTH0_CLIENT_ID`、`AUTH0_CLIENT_SECRET`
+   - 同じアプリケーションの **Advanced Settings** → **Grant Types** タブまでスクロールし、**Token Vault**、**Refresh Token**、**Client Initiated Backchannel Authentication (CIBA)** にチェックを入れます。
+   - Advanced Settings のすぐ上にある **Client-Initiated Backchannel Authentication (CIBA)** セクションに **Notification Channels** があるので、**Guardian Push** を有効化します。
+3. **Custom API** を作成します: Applications → APIs → Create API。:
+    - Name: `SESummitAPI`
+    - Identifier（`aud` クレーム）: `https://agentcore-lab-api` — これは `chatWebApp/env.template` と `agentCoreDeployment/env.sample` に既に入っているデフォルト値と一致します。これは、**Web App .env** と **AgentCore Deployment .env** の両方の `AUTH0_AUDIENCE` .env 変数で指定されている API であり、両方のファイルでこれが `https://agentcore-lab-api` に設定されていることを確認してください。
+    - **Create** を押します
+    - **Settings** タブに移動し、Access Settings までスクロールして `Allow Offline Access` を有効化し、**Save** を押します
+4. Okta org への **Enterprise connection** を作成します: Authentication → Enterprise → OpenID Connect → **Create** ボタン。Auth0 tenant 内に OIDC ベースの Enterprise Connection として作成し、名前は正確に `okta-agentcore` とします。
+   - **Purpose**: `Authentication and Connected Accounts for Token Vault`
+   - **General** の Connection Name: `okta-agentcore`
+   - **OpenID Connect Discovery URL**: `https://{your-okta-domain}/.well-known/openid-configuration`
+   - **Client ID**: 5.2 で作成した Okta OIDC アプリのもの
+   - **Communication Channel**: Back Channel
+   - **Authentication Method**: 5.2 で作成した Okta OIDC アプリの Client Secret
+   - **Callback URL** と **Logout URL** をコピーし、step 5.2.4 で作成した Okta の Integrated App の **Sign-in** および **Sign-out** redirect URI フィールドに入力します
+   - **Create** を押します
+   - API 詳細ページに戻り、**Settings** タブを選択し、**General** -> **Scopes** で `offline_access okta.users.read okta.groups.read` を追加します（Token Vault は後でリフレッシュトークンを引き換える必要があります）。
+   - **Login Experience** タブで、`Display connection as a button` にチェックが入っていることを確認し、**Save** を押します
+   - **Applications** タブで、`AgentCoreLabWebApp` が有効になっていることを確認します
+
+5. **MyAccount API** を有効化してセットアップします: Auth0 Dashboard → **Applications** → **APIs** に移動し、画面上部の **My Account API** の通知ボックスにある **Activate** ボタンをクリックします（そこに表示されていない場合は、既に有効化済みの可能性があります）
+  - これにより **Auth0 My Account API** という新しい API が作成されます。その API 名をクリックして API 詳細ページに移動します:
+  - **Settings** タブで `Require 2FA` をオフにします
+  - **Settings** タブの **Access Settings** セクションで **Allow Skipping User Consent** をオンにします
+  - **Applications** タブで、`AgentCoreLabWebApp` アプリに対するすべての User-delegated Access 権限を許可します
+
+6. **MRRT（Multi-Resource Refresh Token）policy** を設定します: **Applications** に戻り、`AgentCoreLabWebApp` のアプリケーションページに移動し、**Multi-Resource Refresh Token** までスクロールして **Edit Configuration** をクリックします。`Auth0 My Account API` と `SESummitAPI` の**両方**に対して有効化します。これによって、ログイン時に取得した単一のリフレッシュトークンを、後で両方のオーディエンスに対して交換できるようになります —
+   これがないと、MyAccount API オーディエンスへの交換はエラーにならず、黙って元のログインオーディエンスにフォールバックしてしまいます。
+7. **対応する Auth0 ユーザーを作成します**: Auth0 Dashboard → User Management → Users →
+   Create User で、5.2.1 で作成した Okta ユーザーと**同じメールアドレス**を使って作成します。FGA タプル（step 5.4.3 で作成）、Okta のグループメンバーシップ（step 5.2.1 で作成）、この Auth0 ユーザーが、すべて同じ1つのメールアドレスを共有する必要があります。
 
 ### 5.4 Auth0 FGA store のセットアップ
 
-1. `dashboard.fga.dev` で store を作成します。
-2. Model editor — 以下をそのまま貼り付けます:
+1. Okta のメールアドレスを使って `dashboard.fga.dev` にログインします。初めてログインする場合、または保存したい既存のモデルがある場合は、**+ Add new store** を選択して `SESummitAILab` という名前を付け、**Finish** をクリックします。**Model Explorer** をクリックします。
+2. Model Explorer ページの Model ボックス内に、以下をそのまま貼り付けます:
    ```
    model
      schema 1.1
@@ -282,198 +284,85 @@ cd agentcore-auth0-webapp
      relations
        define read_okta: [user, group#member]
    ```
-3. **認可タプルを作成します。** このステップは任意ではなく必須です — モデルスキーマだけでは何も許可されません。タプルがなければ、モデルが正しくても `check()`
-   の呼び出しは常に `allowed: false` を返し、`getOktaGroups` は常に拒否されます。store の **Tuple Management** 画面で、以下のタプルを追加します。
+   そして **Save** を押します。
+3. 左側のメニューから **Tuple Management** を選択し、**+ Add Tuple** ボタンをクリックして認可タプルを作成します。
    - User: `user:<your-test-user's-email>`
+   - Object: `okta`、ID には `groups` を入力
    - Relation: `read_okta`
-   - Object: `okta:groups`
+   > **これは Okta ユーザーおよび Auth0 ユーザーと同じメールアドレスでなければなりません** — デモが動作するには、3つすべてが1つのメールアドレスで揃っている必要があります。
 
-   > **これは Okta ユーザー（5.2.1）と Auth0 ユーザー（5.3.6）と同じメールアドレスでなければなりません** — デモが動作するには、3つすべてが1つのメールアドレスで揃っている必要があります。
-4. **Authorized Clients**: **Store Settings** → **Authorized Clients** →
-   **+ Create Client** に移動します。名前は `SESummitAgent` とします。**Client Authorization** で、
-   **Read and Query**、**Write**、**Write and Delete** のパーミッションにチェックを入れます。
-   > これらが FGA の UI に実際に表示されるチェックボックスのラベルと完全に一致するかは独自に確認していません —
-   > これに頼る前に、実際の表記と一致しているか確認してください。
-   得られた Client ID/Secret を **AgentCore Deployment .env** の `FGA_CLIENT_ID`、`FGA_CLIENT_SECRET` に保存します。
-5. **Store Settings** に移動し、**API URL**、**Store ID**、**Model ID**、**API
-   Token Issuer**、**API Audience** をコピーして、それぞれ **AgentCore Deployment .env** の
-   `FGA_API_URL`、`FGA_STORE_ID`、`FGA_MODEL_ID`、`FGA_API_TOKEN_ISSUER`、
-   `FGA_API_AUDIENCE` に入れます（名前が対応しているので、そのまま貼り付けるだけです）。FGA の設定はエージェントのみが使用し、Web アプリは使用しません — これらは Web App .env には入れません。
+4. 左側のメニューから **Store Settings** に移動し、ページ下部の **Authorized Clients** セクションまでスクロールします。
+- **+ Create Client** ボタンをクリックします
+- **Client Name**: `SESummitAgent`
+- **Client Permissions** で以下をチェックします:
+    - **Read/Write model, changes, and assertions**
+    - **Write and delete tuples**
+    - **Read and query**。
+- **Create** をクリックします
+- 得られた Store ID、Client ID、Client Secret を、それぞれ **AgentCore Deployment .env** の `FGA_STORE_ID`、`FGA_CLIENT_ID`、`FGA_CLIENT_SECRET` に保存します。**Continue** をクリックします
+- モーダルウィンドウの **CURL** タブを選択し、上部にある変数 `FGA_API_URL` `FGA_STORE_ID` `FGA_MODEL_ID` `FGA_API_TOKEN_ISSUER` `FGA_API_AUDIENCE` `FGA_CLIENT_ID` `FGA_CLIENT_SECRET` をコピーして、**AgentCore Deployment .env** ファイル内の同名の変数に貼り付けます。
 
 ### 5.5 AWS のセットアップ
 
 この Lab では、SSO ベースのアクセスのみをサポートする Okta 提供の AWS サンドボックスアカウントを使用します —
-この Lab のどこにも、長期間有効な IAM アクセスキーはありません。AWS に触れるすべての手順 — ローカルのデプロイスクリプトと、
-Web アプリ自身の DynamoDB アクセス — は、静的なクレデンシャルではなく AWS SSO プロファイルを通して認証します。
+この Lab のどこにも、長期間有効な IAM アクセスキーはありません。AWS に触れるすべての手順、ローカルのデプロイスクリプト、そして
+Web アプリ自身の DynamoDB アクセスは、静的なクレデンシャルではなく AWS SSO プロファイルを通して認証します。
 
-1. `aws configure sso` — 一度だけ行うセットアップです。SSO start URL と SSO
-   region、続いて対象のアカウントとロールの入力を求められ、最後に作成されるプロファイルの名前を付けます。ここで付けた名前が、
-   **Web App .env** と **AgentCore Deployment .env** の**両方**の `AWS_PROFILE` に入ります — 両方で同じプロファイル名でなければなりません。
-2. デプロイ先と同じリージョン（`us-west-2`）に、正確に `agentcore-lab-sessions` という名前の DynamoDB テーブルを作成します（両方の
-   `.env` テンプレートにおける `SESSION_TABLE_NAME` のデフォルト値と一致）。パーティションキーは
-   `session_id`（String）です。
+1. ローカルのターミナルで **`aws configure sso` を実行します** — 一度だけ行うセットアップです。これは SSO start URL と SSO
+   region の入力を求めますが、これらは Okta Dashboard（https://okta.okta.com）に移動し、AWS を検索して「AWS Corp: Business Technology」を選択することで取得できます。「okta-bt-gtm-<your okta username>」に似た名前の AWS アカウントを展開し、「Access keys」リンクをクリックします。そこから **SSO Start URL**、**SSO Region** をコピー&ペーストできます。以下の入力が求められます:
 
-### 5.6 AgentCore Deployment .env の入力
+   - **SSO Session name**: `APJSESummit`
+   - **SSO start URL**: AWS access portal からコピー&ペースト
+   - **SSO region**: AWS access portal からコピー&ペースト
+   - **SSO registration scopes**: デフォルトを受け入れる
+   - ブラウザウィンドウが開き、botocore-client-APJSESummit へのアクセス許可を求められるので、`Allow access` を押します
+   - ターミナルに戻り、複数の AWS アカウントを持っている場合は、使用したいアカウントを選択するよう求められるので、okta-bt-gtm-<your user name> を選択します
+   - **Default client Region**: デフォルトを受け入れる
+   - **CLI default output format**: デフォルトを受け入れる
+   - **Profile name**: デフォルトを受け入れる
+   - `GTMUser-<数字の並び>` のようなプロファイル名が表示されるので、そのプロファイル名を **Web App .env** と **AgentCore Deployment .env** の**両方**の `AWS_PROFILE` 変数にコピーします。
 
-`agentCoreDeployment/env.sample` を `agentCoreDeployment/.env` にコピーします。デフォルト値はすでにこの Lab に適した値になっているため、以下の tenant/アカウント固有の項目だけを入力すればよく、それ以外はそのまま残してください:
+2. ローカルのターミナルで **`./deployInfra` を実行します** — これは
+   CloudFormation によって自動化されており、一度の実行で
+   3つのものを作成します。DynamoDB のセッションテーブル、DynamoDB ポリシーが既に紐付けられたエージェントの実行ロール、そしてモック Lambda + AgentCore Gateway + GatewayTarget です。
+   - このスクリプトは `AWS_PROFILE`、`AUTH0_DOMAIN`、
+     `AUTH0_CLIENT_ID` の入力を求めます
 
-| 変数 | 値の入手元 |
-|---|---|
-| `AWS_PROFILE` | 5.5.1 で設定した `aws configure sso` のプロファイル名 |
-| `AWS_DEFAULT_REGION` | 他のリージョンにデプロイしない限り `us-west-2` のままにする |
-| `AUTH0_DOMAIN` | 自分の Auth0 tenant のドメイン（スキームなしの素の値） |
-| `AUTH0_CLIENT_ID` / `AUTH0_CLIENT_SECRET` | 5.3.1 の `AgentCoreLabWebApp` アプリ（CIBA でも再利用） |
-| `AUTH0_AUDIENCE` | `https://agentcore-lab-api` のままにする — Web App .env の値、および 5.3.2 の API identifier と正確に一致させる必要がある |
-| `SESSION_TABLE_NAME` | `agentcore-lab-sessions` のままにする — Web App .env の値と正確に一致させる必要がある |
-| `CIBA_SCOPE` / `CIBA_BINDING_MESSAGE` | デフォルトのままにするか、ユーザーのプッシュ承認デバイスに表示される binding message をカスタマイズする |
-| `FGA_API_URL`, `FGA_STORE_ID`, `FGA_MODEL_ID`, `FGA_API_TOKEN_ISSUER`, `FGA_API_AUDIENCE`, `FGA_CLIENT_ID`, `FGA_CLIENT_SECRET` | 5.4.4/5.4.5 で得た FGA store の設定出力 |
-| `FGA_API_SCHEME` | `https` のままにする |
-| `MCP_GATEWAY_URL` | Gateway のセットアップ（5.10）を完了した時点で入力する |
-| `OKTA_DOMAIN` | 5.2.5 の素の Okta org ドメイン — `-admin` ホストは**不可** |
-| `BEDROCK_MODEL_ID` | デフォルトは `global.anthropic.claude-sonnet-5` — デプロイ前に、まだ有効かどうかを確認する（Section 6） |
+   - 最後に `AGENT_EXECUTION_ROLE_ARN` と
+     `MCP_GATEWAY_URL` を出力するので、これらを **AgentCore Deployment .env** にコピーし、既存の変数を置き換えます。
 
-### 5.7 Web App .env の入力
-
-`chatWebApp/env.template` を `chatWebApp/.env` にコピーします。AgentCore Deployment .env と同様、デフォルト値はすでにこの Lab に適した値になっています:
-
-| 変数 | 値の入手元 |
-|---|---|
-| `APP_SECRET_KEY` | 自分で生成する: `python3 -c "import secrets; print(secrets.token_hex(32))"` |
-| `AUTH0_CLIENT_ID` / `AUTH0_CLIENT_SECRET` / `AUTH0_DOMAIN` | 5.3.1 と同じ Auth0 アプリ |
-| `AUTH0_AUDIENCE` | `https://agentcore-lab-api` のままにする — AgentCore Deployment .env と同じ値 |
-| `AUTH0_SCOPE` | デフォルトのままにする — `create:me:connected_accounts` を含む必要があり、`chatWebApp/env.template` では既にそうなっている |
-| `CONNECTED_ACCOUNT_SCOPE` | デフォルト（`openid profile email offline_access okta.users.read`）のままにする — connection 自体のデフォルトスコープにも `okta.users.read` が含まれている場合にのみ機能する（5.3.3） |
-| `AUTH0_CONNECTION_NAME` | `okta-agentcore` のままにする — 5.3.3 で設定した connection の Name と一致する |
-| `AWS_PROFILE` | AgentCore Deployment .env と同じ SSO プロファイル名（5.5.1） |
-| `AWS_REGION` | `us-west-2` のままにする — DynamoDB テーブル/デプロイ先と同じリージョン |
-| `AGENT_RUNTIME_ARN` | デプロイ後に入力する（5.8） |
-| `SESSION_TABLE_NAME` | `agentcore-lab-sessions` のままにする — AgentCore Deployment .env と同じ値 |
-
-ここには `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN` といった変数はありません —
-Web アプリの DynamoDB アクセスは、静的なクレデンシャルではなく、5.5 で説明した同じ `AWS_PROFILE` の SSO セッションを通して行われます。
-
-### 5.8 エージェントのデプロイ
+### 5.6 エージェントのデプロイ
+ローカルのターミナルで以下を実行します:
 
 ```bash
 ./deployAgentCore
 ```
 
-これは `AWS_PROFILE`（5.5.1）の AWS SSO セッションを確認し、実体のある Python
-3.10+ を解決し、初回実行時に `agentCoreDeployment/.venv` を作成して
-`agentCoreDeployment/requirements.txt` をインストールし、`agentcore_deployment.py` を実行します。このスクリプトは:
+これは `AWS_PROFILE`（5.5.1）の AWS SSO セッションを確認し、初回実行時に `agentCoreDeployment/.venv` を作成し、
+`agentCoreDeployment/requirements.txt` をインストールし、`agentcore_deployment.py` を実行します。これは正常に完了すると `AGENT_RUNTIME_ARN: <arn>` を出力します。
 
-- `AWS_PROFILE`（SSO）経由で認証します
-- `discoveryUrl`（`AUTH0_DOMAIN` から導出）と `allowedAudience`（`AUTH0_AUDIENCE`
-  から）を使った `customJWTAuthorizer` を指定して `Runtime.configure(...)` を呼び出します — `allowedClients` はありません
-- `Runtime.launch(env_vars=RUNTIME_ENV_VARS)` を呼び出し、約17個の変数をデプロイされた
-  コンテナの環境にプッシュします
-- 成功時に `AGENT_RUNTIME_ARN: <arn>` を出力します — これを `chatWebApp/.env` の
-  `AGENT_RUNTIME_ARN` にコピーしてください
-
-**初回のデプロイが成功した後、DynamoDB の IAM ポリシーを手動で紐付けてください** — これは自動化されていません。
-`auto_create_execution_role=True` は実行ロール自体は作成しますが、DynamoDB の権限を紐付けることはしないため、これを手動で行うまでエージェントはセッションデータの読み書きに失敗します:
-
-1. IAM コンソールで、
-   `AmazonBedrockAgentCoreSDKRuntime-<region>-<hash>` のような名前で自動作成されたロールを見つけます。
-2. 以下を許可する inline（または managed）ポリシーを紐付けます:
-   ```json
-   {
-     "Effect": "Allow",
-     "Action": ["dynamodb:GetItem", "dynamodb:PutItem"],
-     "Resource": "arn:aws:dynamodb:<region>:<account_id>:table/<your-session-table>"
-   }
-   ```
-   実際のリージョン、アカウント ID、そして `agentcore-lab-sessions`（または 5.5.2 で付けたテーブル名）に置き換えてください。
+**これをコピー**して `chatWebApp/.env` の `AGENT_RUNTIME_ARN` に入れます
 
 ### 5.9 Web アプリの実行
 
+ターミナルウィンドウで以下を実行して、Web アプリを起動します:
 ```bash
 ./runLocalApp
 ```
 
-Web アプリを起動します。
+Web ブラウザを開き、(http://127.0.0.1:5000) にアクセスします。
+ターミナル内で `ctrl + c` を押すことで、Web アプリを停止できます。
 
-### 5.10 AgentCore Gateway のセットアップ（モック MCP ツール）
-
-このステップでは、**Amazon Bedrock AgentCore
-Gateway** を介して、エージェントのための2つ目のリモートツールを接続します — これは実際のバックエンドツール（「自分に割り当てられたタスクを一覧表示する」）の代わりとなる、意図的にモック化されたものです。これはこの Lab が示す内容（エージェントが、直接コーディングされたツールと動的に発見されたリモートツールを1つのインターフェースの背後に統合すること）の一部であり、スキップせずに完了させるべきステップです。
-
-このリポジトリには、Lambda/Gateway 用のインフラコードは含まれていません — すべてブログの手順に従って、AWS コンソール上で手作業で構築します。
-
-**アーキテクチャに関する補足**: これは Lambda-ARN の Gateway target であり、本物の MCP サーバーや
-OpenAPI target ではありません。Gateway は「Target Schema」を使って単純な Lambda function をラップし、
-エージェントがそれを MCP ツールのように発見・呼び出せるようにしています。これが重要なのは、Lambda-ARN
-target は function を呼び出す際に Gateway 自身の IAM/SigV4 サービスロールしかサポートしない点です — 本物の MCP サーバーや
-OpenAPI target タイプが行うような、Gateway ネイティブの OAuth トークン交換 / ユーザー単位の
-委任は**サポートしません**。エージェントが送信するベアラートークンは、Gateway の*インバウンド*認可（下記ステップ5）にのみ使われ、
-Lambda より下流の何かに使われるわけではありません。
-
-1. **モック Lambda を作成**: AWS Lambda console → Create function、Python 3.x
-   ランタイム。ハンドラー:
-   ```python
-   import json
-   def lambda_handler(event, context):
-       return {
-           'statusCode': 200,
-           'body': json.dumps({
-               'message': 'Tasks retrieved successfully',
-               'Task ID': "task1",
-               'Task Description': 'Update the OAuth Flow with XAA details'
-           })
-       }
-   ```
-   作成された Lambda の ARN をメモしておきます。
-2. **Gateway を作成**: Amazon Bedrock AgentCore console → Gateways → Create
-   Gateway。名前は任意で構いません。
-3. **target を追加**: Gateway 内で、Target Type: **Lambda ARN** を選び、ステップ1の Lambda
-   ARN を貼り付けます。Target Name は任意の識別子で構いません。
-4. **Target Schema** — エージェントに公開される MCP ツール定義:
-   ```json
-   [
-     {
-       "name": "get_tasks",
-       "description": "Returns a set of tasks for IT Admin.",
-       "inputSchema": {
-         "type": "object",
-         "properties": {},
-         "required": []
-       }
-     }
-   ]
-   ```
-5. **Inbound Auth Configuration**: Discovery URL =
-   `https://{AUTH0_DOMAIN}/.well-known/openid-configuration`、さらに Custom Claim として Name
-   `azp`、Type `String`、Value = Auth0 アプリケーションの Client ID（5.3.1 のもの）を設定します。これは Runtime 自身の `customJWTAuthorizer`
-   （5.8）と並行するものですが、別に設定します。
-6. **権限を設定**: 既存のサービスロールを使うか、コンソールに新しいロールを作成させます — これは Gateway 自身が Lambda を呼び出す際に引き受けるロールであり、ユーザー単位の Auth0 トークンとは関係ありません。
-7. **エージェントに接続**: Gateway の MCP エンドポイント URL（形式:
-   `https://<gateway-id>.gateway.bedrock-agentcore.<region>.amazonaws.com/mcp`）をメモし、
-   **AgentCore Deployment .env** の `MCP_GATEWAY_URL` に設定します。コードの変更は不要です。
-   `agentCoreDeployment/agentcore_agent.py` の `create_transport()` は、すでに
-   `streamablehttp_client(MCP_GATEWAY_URL, headers={"Authorization": f"Bearer
-   {access_token}"})` 経由で接続し、他の場所で使われているのと同じ Auth0 アクセストークンをベアラークレデンシャルとして送信します。
-   `strands_agent_bedrock` の `MCPClient(create_transport)` コンテキストマネージャーが
-   `list_tools_sync()` を呼び出し、`get_tasks` をローカルのツールと並ぶリモートツールとして取り込みます。
-8. 新しい `MCP_GATEWAY_URL` が実行中のコンテナの環境に反映されるよう、再デプロイします（`./deployAgentCore`）。
-
-5.11 でこれをテストします。
-
-### 5.11 フローのテスト
+### 5.10 フローのテスト
 
 1. `http://127.0.0.1:5000` を開き、login をクリックします。Auth0 のログインを完了させます（tenant のポリシーに応じて
    MFA/consent が求められる場合があります）。
 2. 自動的に Connect Account フローにリダイレクトされます — プロンプトが出たら Okta の
    ログインを承認します。成功すると `/chat` に到達し、connected-account のステータスが表示されます。
-3. *「自分はどの Okta グループに入っていますか？」* と聞いてみます — FGA チェックが通ることを期待します（
-   エージェントのログで `FGA response: ... 'allowed': True` を確認）。その後、Okta から実際のグループリストが返ってきます。これはエンドツーエンドで動作するはずです。もし代わりに 403
-   `insufficient_scope` が出た場合は、Section 4 の「federated token に `okta.users.read` を付与する」を参照してください — 必要な2つの
-   スコープ設定のうち片方が欠けているので、修正後に Connect Account を再実行する必要があります。
+3. *「自分はどの Okta グループに入っていますか？」* と聞いてみます — FGA チェックが通ることを期待します（確認方法:
+   エージェントのログで `FGA response: ... 'allowed': True` を確認）、その後、Okta から実際のグループリストが返ってきます。
 4. パスワードのリセットを依頼して（例: *「パスワードをリセットして」*）CIBA パスを試します —
    ユーザーの登録済みデバイスにプッシュ承認プロンプトが表示されるはずです。承認すると、エージェントから成功メッセージが返るはずです。
-5. *「自分に割り当てられたタスクは何ですか？」* のように聞いて、5.10 の Gateway/MCP パスを試します —
-   `agentcore_agent.py` のシステムプロンプトは、「employee
-   tasks」/「assigned work」/「employee records」といった問い合わせを、その時点で利用可能な動的リモートツールへルーティングするようになっており、これによって
-   `get_tasks` が選ばれ、モックのタスクデータが返されるはずです。
 
 上記のいずれかが説明通りに動作しない場合は、Section 6「トラブルシューティング」を参照してください。
 
@@ -517,8 +406,68 @@ Bedrock のモデル ID やクロスリージョン推論プロファイルは�
    `client_id` ではなく `azp` を持つため、`allowedClients` は決して一致しません）。
 2. `runtimeSessionId` が 33 文字以上であること（このリポジトリ自身の `session_id` UUID4 は
    すでにこれを満たしています — このコードを変更した場合のみ関係します）。
-3. DynamoDB の IAM ポリシー（5.8）が、自動作成された実行ロールに紐付けられていること。
+3. DynamoDB の IAM ポリシーが、`AGENT_EXECUTION_ROLE_ARN`（`./deployInfra` によって作成される、5.5.2/5.8）に指定された
+   実行ロールに紐付けられていること — `infrastructure/templates/02-agent-execution-role.yaml` が正常にデプロイされているか確認してください。
 
 コンテナ内部から **500** が出た場合は、CloudWatch の
 `/aws/bedrock-agentcore/runtimes/<agent_id>-<endpoint_name>` 以下を確認してください — `[runtime-logs]`
 ストリームに実際の Python トレースバックが表示されます。
+
+### `deployAgentCore`/`runLocalApp` における Python バージョンの不一致
+
+両方のスクリプトは `BASE_PYTHON` を解決します（Homebrew の `python3.12` を優先し、`3.11`/`3.10`/システムの `python3`
+の順にフォールバックします）。そして `.venv` がまだ存在していない場合にのみ、それを元に `.venv` を作成します。以前にどちらかの
+スクリプトを実行したことがあり、その後 Python をインストール/アップグレードした場合（例えば Homebrew 経由で）、スクリプトはそれに
+気づきません — 既存の `.venv` を、黙って*古い*インタープリタのままで再利用します。症状としては、現在インストールされている
+Python から期待される動作と一致しない、バージョン関連の import エラーや予期しないパッケージの動作として現れます。
+
+修正方法: 古い venv を削除し、次回の実行時にスクリプトが現在の `BASE_PYTHON` から再構築するようにします —
+```bash
+rm -rf agentCoreDeployment/.venv   # for deployAgentCore
+rm -rf chatWebApp/.venv            # for runLocalApp
+```
+コードの変更は不要です。これは一度だけ行うクリーンアップであり、繰り返し行う手順ではありません。
+
+
+
+## 7. 環境変数リファレンス
+
+### AgentCore Deployment .env
+
+`agentCoreDeployment/env.template` を `agentCoreDeployment/.env` にコピーします。デフォルト値はすでにこの Lab に適した値になっているため、以下の tenant/アカウント固有の項目だけを入力すればよく、それ以外はそのまま残してください:
+
+| 変数 | 値の入手元 |
+|---|---|
+| `AWS_PROFILE` | 5.5.1 で設定した `aws configure sso` のプロファイル名 |
+| `AWS_DEFAULT_REGION` | 他のリージョンにデプロイしない限り `us-west-2` のままにする |
+| `AUTH0_DOMAIN` | 自分の Auth0 tenant のドメイン（スキームなしの素の値） |
+| `AUTH0_CLIENT_ID` / `AUTH0_CLIENT_SECRET` | 5.3.1 の `AgentCoreLabWebApp` アプリ（CIBA でも再利用） |
+| `AUTH0_AUDIENCE` | `https://agentcore-lab-api` のままにする — Web App .env の値、および 5.3.2 の API identifier と正確に一致させる必要がある |
+| `SESSION_TABLE_NAME` | `agentcore-lab-sessions` のままにする — Web App .env の値と正確に一致させる必要がある |
+| `CIBA_SCOPE` / `CIBA_BINDING_MESSAGE` | デフォルトのままにするか、ユーザーのプッシュ承認デバイスに表示される binding message をカスタマイズする |
+| `FGA_API_URL`, `FGA_STORE_ID`, `FGA_MODEL_ID`, `FGA_API_TOKEN_ISSUER`, `FGA_API_AUDIENCE`, `FGA_CLIENT_ID`, `FGA_CLIENT_SECRET` | 5.4.4/5.4.5 で得た FGA store の設定出力 |
+| `FGA_API_SCHEME` | `https` のままにする |
+| `AGENT_EXECUTION_ROLE_ARN` | `./infrastructure/deployInfra`（5.5.2）の出力である `ExecutionRoleArn` |
+| `MCP_GATEWAY_URL` | `./infrastructure/deployInfra`（5.5.2）の出力である `GatewayUrl` |
+| `OKTA_DOMAIN` | 5.2.5 の素の Okta org ドメイン — `-admin` ホストは**不可** |
+| `BEDROCK_MODEL_ID` | デフォルトは `global.anthropic.claude-sonnet-5` — デプロイ前に、まだ有効かどうかを確認する（Section 6） |
+
+### Web App .env
+
+`chatWebApp/env.template` を `chatWebApp/.env` にコピーします。AgentCore Deployment .env と同様、デフォルト値はすでにこの Lab に適した値になっています:
+
+| 変数 | 値の入手元 |
+|---|---|
+| `APP_SECRET_KEY` | 自分で生成する: `python3 -c "import secrets; print(secrets.token_hex(32))"` |
+| `AUTH0_CLIENT_ID` / `AUTH0_CLIENT_SECRET` / `AUTH0_DOMAIN` | 5.3.1 と同じ Auth0 アプリ |
+| `AUTH0_AUDIENCE` | `https://agentcore-lab-api` のままにする — AgentCore Deployment .env と同じ値 |
+| `AUTH0_SCOPE` | デフォルトのままにする — `create:me:connected_accounts` を含む必要があり、`chatWebApp/env.template` では既にそうなっている |
+| `CONNECTED_ACCOUNT_SCOPE` | デフォルト（`openid profile email offline_access okta.users.read`）のままにする — connection 自体のデフォルトスコープにも `okta.users.read` が含まれている場合にのみ機能する（5.3.3） |
+| `AUTH0_CONNECTION_NAME` | `okta-agentcore` のままにする — 5.3.3 で設定した connection の Name と一致する |
+| `AWS_PROFILE` | AgentCore Deployment .env と同じ SSO プロファイル名（5.5.1） |
+| `AWS_REGION` | `us-west-2` のままにする — DynamoDB テーブル/デプロイ先と同じリージョン |
+| `AGENT_RUNTIME_ARN` | デプロイ後に入力する（5.8） |
+| `SESSION_TABLE_NAME` | `agentcore-lab-sessions` のままにする — AgentCore Deployment .env と同じ値 |
+
+ここには `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN` といった変数はありません —
+Web アプリの DynamoDB アクセスは、静的なクレデンシャルではなく、同じ `AWS_PROFILE` の SSO セッションを通して行われます。
